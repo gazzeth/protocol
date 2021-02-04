@@ -1,0 +1,2 @@
+# protocol
+Gazzeth decentralized protocol
