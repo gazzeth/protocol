@@ -16,5 +16,8 @@
   "bugs": {
     "url": "https://github.com/gazzeth/protocol/issues"
   },
-  "homepage": "https://github.com/gazzeth/protocol#readme"
+  "homepage": "https://github.com/gazzeth/protocol#readme",
+  "devDependencies": {
+    "hardhat": "^2.0.8"
+  }
 }
