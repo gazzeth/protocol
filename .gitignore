@@ -19,7 +19,9 @@ artifacts/
 .env.test.local
 .env.production.local
 
+# editors
 /.idea
+.vscode
 *.tsbuildinfo
 
 .DS_Store
