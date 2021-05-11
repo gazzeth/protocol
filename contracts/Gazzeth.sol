@@ -2,24 +2,39 @@
 pragma solidity ^0.7.0;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/drafts/ERC20Permit.sol";
 
-contract Gazzeth is ERC20 {
+contract Gazzeth is ERC20, ERC20Permit {
 
-    uint8 constant CLAIM_AMOUNT = 10;
-
-    mapping (address => bool) hasAlreadyClaimed;
-
-    constructor() ERC20("Gazzeth", "GZT") {
-        _setupDecimals(18);
+    modifier onlyProtocolContract() {
+        require(_msgSender() == protocolContract, "Only Gazzeth protocol contract can call this function");
+        _;
     }
 
-   /**
-     * Mints claimAmount tokens and assign it to the caller. This can be done only once by caller.
-     * This function will be removed later when a better mint mechanism is implemented.
-     */
-    function claim() external {
-        require(!hasAlreadyClaimed[msg.sender], "You can only claim for Gazzeths once and you have already done it.");
-        hasAlreadyClaimed[msg.sender] = true;
-        _mint(msg.sender, CLAIM_AMOUNT);
+    string constant NAME = "Gazzeth";
+    string constant SYMBOL = "GZT";
+
+    address owner;
+    address protocolContract;
+    bool protocolContractAddressSet;
+
+    constructor() ERC20(NAME, SYMBOL) ERC20Permit(NAME) {
+        owner = _msgSender();
+    }
+
+    function setProtocolContractAddress(address _protocolContract) external {
+        require(_msgSender() == owner, "Only owner can call this function");
+        require(!protocolContractAddressSet, "Protocol contract address already set");
+        protocolContract = _protocolContract;
+        protocolContractAddressSet = true;
+    }
+    
+    //TODO: Check if it is preferred transfering from/to address(0)
+    function mint(address _toAccount, uint256 _amount) external onlyProtocolContract() {
+        _mint(_toAccount, _amount); 
+    }
+
+    function burn(address _fromAccount, uint256 _amount) external onlyProtocolContract() {
+        _burn(_fromAccount, _amount);
     }
 }
