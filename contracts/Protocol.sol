@@ -143,8 +143,4 @@ contract Protocol is EIP712 {
         require(signer == msg.sender, "Invalid vote reveal: signature authenticity");
         publications[_publicationId].votation.votes[msg.sender].justification = _justification;
     }
-
-    function getCurrentVoteCommitmentNonce(address _juror, uint256 _publicationId) external view returns (uint256) {
-        return publications[_publicationId].votation.votes[_juror].nonce.current();
-    }
 }
