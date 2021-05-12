@@ -1,22 +1,25 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.7.0;
 
+import "@openzeppelin/contracts/drafts/EIP712.sol";
 import "@openzeppelin/contracts/math/SafeMath.sol";
+import "@openzeppelin/contracts/utils/Counters.sol";
 import "./interfaces/IDai.sol";
 import "./interfaces/IProofOfHumanity.sol";
 import "./Gazzeth.sol";
 
-contract Protocol {
+contract Protocol is EIP712 {
 
     using SafeMath for uint256;
+    using Counters for Counters.Counter;
 
-    modifier onlyExistentPublications(uint256 publicationId) {
-        require(publicationId < nextPublicationId, "Publication does not exist");
+    modifier onlyExistentPublications(uint256 _publicationId) {
+        require(_publicationId < nextPublicationId, "Publication does not exist");
         _;
     }
 
-    modifier onlyPublicationJurors(uint256 publicationId) {
-        require(publications[publicationId].votation.jurors[msg.sender], "You are not a juror for this publication");
+    modifier onlyPublicationJurors(uint256 _publicationId) {
+        require(publications[_publicationId].votation.jurors[msg.sender], "You are not a juror for this publication");
         _;
     }
 
@@ -28,7 +31,9 @@ contract Protocol {
     }
     
     struct Vote {
+        Counters.Counter nonce;
         VoteValue value;
+        bytes32 commitment;
         string justification;
     }
 
@@ -72,7 +77,7 @@ contract Protocol {
         IProofOfHumanity _proofOfHumanity,
         uint256 _minTopicJurorsQuantity,
         uint256 _votingJurorsQuantity
-    ) {
+    ) EIP712("Protocol", "1") {
         gazzeth = _gazzeth;
         dai = _dai;
         proofOfHumanity = _proofOfHumanity;
@@ -101,5 +106,43 @@ contract Protocol {
         dai.permit(msg.sender, address(this), _nonce, _expiry, true, _v, _r, _s);
         dai.transferFrom(msg.sender, address(this), topics[_topicId].publishPrice);
         return nextPublicationId++;
+    }
+
+    function commitVote(
+        uint256 _publicationId, bytes32 _commitment
+    ) external onlyExistentPublications(_publicationId) onlyPublicationJurors(_publicationId) {
+        uint256 publishDate = publications[_publicationId].publishDate;
+        uint256 commitmentDeadline = topics[publications[_publicationId].topicId].voteCommitmentDeadline;
+        require(publishDate + commitmentDeadline <= block.timestamp, "Vote commitment phase has already finished");
+        publications[_publicationId].votation.votes[msg.sender].commitment = _commitment;
+        publications[_publicationId].votation.votes[msg.sender].nonce.increment();
+    }
+
+    function revealVote(
+        uint256 _publicationId, VoteValue _vote, string calldata _justification, uint8 _v, bytes32 _r, bytes32 _s
+    ) external onlyExistentPublications(_publicationId) onlyPublicationJurors(_publicationId) {
+        uint256 publishDate = publications[_publicationId].publishDate;
+        uint256 commitmentDeadline = topics[publications[_publicationId].topicId].voteCommitmentDeadline;
+        uint256 revealDeadline = topics[publications[_publicationId].topicId].voteRevealDeadline;
+        // TODO: Even reverting, I think vote value is now public on etherscan. Penalize DAI deposit instead of reverting?
+        require(publishDate + commitmentDeadline >= block.timestamp, "Vote commitment phase has not finished yet");
+        require(publications[_publicationId].votation.votes[msg.sender].nonce.current() > 0, "Missing vote commitment");
+        require(publishDate + revealDeadline <= block.timestamp, "Vote commitment phase has not finished yet");
+        bytes32 hashStruct = keccak256(
+            abi.encode(
+                keccak256("RevealVote(uint256 publicationId,VoteValue vote,uint256 nonce)"),
+                _publicationId,
+                _vote,
+                publications[_publicationId].votation.votes[msg.sender].nonce.current() - 1
+            )
+        );
+        bytes32 hash = _hashTypedDataV4(hashStruct);
+        address signer = ECDSA.recover(hash, _v, _r, _s);
+        require(signer == msg.sender, "Invalid reveal");
+        publications[_publicationId].votation.votes[msg.sender].justification = _justification;
+    }
+
+    function getCurrentVoteCommitmentNonce(address _juror, uint256 _publicationId) external view returns (uint256) {
+        return publications[_publicationId].votation.votes[_juror].nonce.current();
     }
 }
