@@ -10,13 +10,13 @@ contract Protocol {
 
     using SafeMath for uint256;
 
-    modifier onlyExistentPublications(uint256 publicationId) {
-        require(publicationId < nextPublicationId, "Publication does not exist");
+    modifier onlyExistentPublications(uint256 _publicationId) {
+        require(_publicationId < nextPublicationId, "Publication does not exist");
         _;
     }
 
-    modifier onlyPublicationJurors(uint256 publicationId) {
-        require(publications[publicationId].votation.jurors[msg.sender], "You are not a juror for this publication");
+    modifier onlyPublicationJurors(uint256 _publicationId) {
+        require(publications[_publicationId].votation.jurors[msg.sender], "You are not a juror for this publication");
         _;
     }
 
