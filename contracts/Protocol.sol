@@ -16,7 +16,7 @@ contract Protocol {
     }
 
     modifier onlyPublicationJurors(uint256 publicationId) {
-        require(addressIsJurorInPublication(msg.sender, publicationId), "You are not a juror for this publication");
+        require(publications[publicationId].votation.jurors[msg.sender], "You are not a juror for this publication");
         _;
     }
 
@@ -33,14 +33,14 @@ contract Protocol {
     }
 
     struct Votation {
-        address[] jurors;
+        mapping (address => bool) jurors;
         mapping (address => Vote) votes;
     }
 
     struct Publication {
         string hash;
         address author;
-        string topicId;
+        uint256 topicId;
         uint256 publishDate;
         Votation votation;
     }
@@ -93,7 +93,6 @@ contract Protocol {
         require(topics[_topicId].jurorQuantity >= minTopicJurorsQuantity, "Insuficient jurors subscribed to the topic");
         require(dai.balanceOf(msg.sender) >= topics[_topicId].publishPrice, "Insuficient DAI to publish");
         Publication storage publication = publications[nextPublicationId];
-        publication.id = nextPublicationId;
         publication.hash = _publicationHash;
         publication.author = msg.sender;
         publication.publishDate = block.timestamp;
