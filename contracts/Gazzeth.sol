@@ -9,12 +9,12 @@ contract Gazzeth is ERC20, ERC20Permit {
 
     using SafeMath for uint256;
 
-    string constant NAME = "Gazzeth";
-    string constant SYMBOL = "GZT";
+    string public constant NAME = "Gazzeth";
+    string public constant SYMBOL = "GZT";
 
-    address owner;
-    address protocolContract;
-    bool protocolContractAddressSet;
+    address public owner;
+    address public protocolContract;
+    bool public protocolContractAddressSet;
 
     constructor() ERC20(NAME, SYMBOL) ERC20Permit(NAME) {
         owner = _msgSender();
