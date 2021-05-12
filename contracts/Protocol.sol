@@ -43,7 +43,7 @@ contract Protocol is EIP712 {
     }
 
     struct Publication {
-        string hash;
+        string rebuiltCommitment;
         address author;
         uint256 topicId;
         uint256 publishDate;
@@ -98,7 +98,7 @@ contract Protocol is EIP712 {
         require(topics[_topicId].jurorQuantity >= minTopicJurorsQuantity, "Insuficient jurors subscribed to the topic");
         require(dai.balanceOf(msg.sender) >= topics[_topicId].publishPrice, "Insuficient DAI to publish");
         Publication storage publication = publications[nextPublicationId];
-        publication.hash = _publicationHash;
+        publication.rebuiltCommitment = _publicationHash;
         publication.author = msg.sender;
         publication.publishDate = block.timestamp;
         publication.topicId = _topicId;
@@ -136,9 +136,11 @@ contract Protocol is EIP712 {
                 publications[_publicationId].votation.votes[msg.sender].nonce.current() - 1
             )
         );
-        bytes32 hash = _hashTypedDataV4(hashStruct);
-        address signer = ECDSA.recover(hash, _v, _r, _s);
-        require(signer == msg.sender, "Invalid reveal");
+        bytes32 rebuiltCommitment = _hashTypedDataV4(hashStruct);
+        bytes32 commitment = publications[_publicationId].votation.votes[msg.sender].commitment;
+        require(commitment == rebuiltCommitment, "Invalid vote reveal: revealed values do not match commitment");
+        address signer = ECDSA.recover(rebuiltCommitment, _v, _r, _s);
+        require(signer == msg.sender, "Invalid vote reveal: signature authenticity");
         publications[_publicationId].votation.votes[msg.sender].justification = _justification;
     }
 
