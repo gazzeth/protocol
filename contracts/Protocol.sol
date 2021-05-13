@@ -88,6 +88,10 @@ contract Protocol is EIP712 {
         REVEAL_VOTE_TYPEHASH = keccak256("RevealVote(uint256 publicationId,VoteValue vote,uint256 nonce)");
     }
 
+    function getVoteCommitmentNonce(address _juror, uint256 _publicationId) external view returns (uint256) {
+        return publications[_publicationId].votation.votes[_juror].nonce.current();
+    }
+
     function publish(
         string calldata _publicationHash,
         uint256 _topicId,
