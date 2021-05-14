@@ -3,7 +3,6 @@ pragma solidity ^0.7.0;
 
 import "@openzeppelin/contracts/drafts/EIP712.sol";
 import "@openzeppelin/contracts/math/SafeMath.sol";
-import "@openzeppelin/contracts/utils/Counters.sol";
 import "./interfaces/IDai.sol";
 import "./interfaces/IProofOfHumanity.sol";
 import "./Gazzeth.sol";
@@ -11,7 +10,6 @@ import "./Gazzeth.sol";
 contract Protocol is EIP712 {
 
     using SafeMath for uint256;
-    using Counters for Counters.Counter;
 
     modifier onlyExistentPublications(uint256 _publicationId) {
         require(_publicationId < nextPublicationId, "Publication does not exist");
@@ -31,7 +29,7 @@ contract Protocol is EIP712 {
     }
     
     struct Vote {
-        Counters.Counter nonce;
+        uint256 nonce;
         VoteValue value;
         bytes32 commitment;
         string justification;
@@ -43,7 +41,7 @@ contract Protocol is EIP712 {
     }
 
     struct Publication {
-        string rebuiltCommitment;
+        string hash;
         address author;
         uint256 topicId;
         uint256 publishDate;
@@ -88,8 +86,8 @@ contract Protocol is EIP712 {
         REVEAL_VOTE_TYPEHASH = keccak256("RevealVote(uint256 publicationId,VoteValue vote,uint256 nonce)");
     }
 
-    function getVoteCommitmentNonce(address _juror, uint256 _publicationId) external view returns (uint256) {
-        return publications[_publicationId].votation.votes[_juror].nonce.current();
+    function getCommitmentNonce(address _juror, uint256 _publicationId) external view returns (uint256) {
+        return publications[_publicationId].votation.votes[_juror].nonce;
     }
 
     function publish(
@@ -105,7 +103,7 @@ contract Protocol is EIP712 {
         require(topics[_topicId].jurorQuantity >= minTopicJurorsQuantity, "Insuficient jurors subscribed to the topic");
         require(dai.balanceOf(msg.sender) >= topics[_topicId].publishPrice, "Insuficient DAI to publish");
         Publication storage publication = publications[nextPublicationId];
-        publication.rebuiltCommitment = _publicationHash;
+        publication.hash = _publicationHash;
         publication.author = msg.sender;
         publication.publishDate = block.timestamp;
         publication.topicId = _topicId;
@@ -125,11 +123,12 @@ contract Protocol is EIP712 {
      **                    )
      */
     function commitVote(
-        uint256 _publicationId, bytes32 _commitment
+        uint256 _publicationId, uint256 _nonce, bytes32 _commitment
     ) external onlyExistentPublications(_publicationId) onlyPublicationJurors(_publicationId) {
         require(timeToFinishCommitPhase(_publicationId) > 0, "Vote commit phase has already finished");
+        require(_nonce >= publications[_publicationId].votation.votes[msg.sender].nonce, "Nonce must be greater than the last one");
         publications[_publicationId].votation.votes[msg.sender].commitment = _commitment;
-        publications[_publicationId].votation.votes[msg.sender].nonce.increment();
+        publications[_publicationId].votation.votes[msg.sender].nonce = _nonce + 1;
     }
 
     function revealVote(
@@ -140,7 +139,7 @@ contract Protocol is EIP712 {
          ** Maybe setting a penalization flag and return a bool indicating it, then penalize DAI even if vote was wright
          */
         require(timeToFinishCommitPhase(_publicationId) == 0, "Vote commit phase has not finished yet");
-        require(publications[_publicationId].votation.votes[msg.sender].nonce.current() > 0, "Missing vote commitment");
+        require(publications[_publicationId].votation.votes[msg.sender].nonce > 0, "Missing vote commitment");
         require(timeToFinishRevealPhase(_publicationId) > 0, "Vote reveal phase has already finished");
         require(
             publications[_publicationId].votation.votes[msg.sender].commitment == keccak256(abi.encode(_v, _r, _s)),
@@ -160,7 +159,7 @@ contract Protocol is EIP712 {
                 REVEAL_VOTE_TYPEHASH,
                 _publicationId,
                 _vote,
-                publications[_publicationId].votation.votes[msg.sender].nonce.current() - 1
+                publications[_publicationId].votation.votes[msg.sender].nonce - 1
             )
         );
     }
