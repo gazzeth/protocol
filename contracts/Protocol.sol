@@ -83,7 +83,7 @@ contract Protocol is EIP712 {
         proofOfHumanity = _proofOfHumanity;
         minTopicJurorsQuantity = _minTopicJurorsQuantity;
         votingJurorsQuantity = _votingJurorsQuantity;
-        REVEAL_VOTE_TYPEHASH = keccak256("RevealVote(uint256 publicationId,VoteValue vote,uint256 nonce)");
+        REVEAL_VOTE_TYPEHASH = keccak256("RevealVote(uint256 publicationId,VoteValue vote)");
     }
 
     function getCommitmentNonce(address _juror, uint256 _publicationId) external view returns (uint256) {
@@ -123,7 +123,7 @@ contract Protocol is EIP712 {
      **                    )
      */
     function commitVote(
-        uint256 _publicationId, uint256 _nonce, bytes32 _commitment
+        uint256 _publicationId, bytes32 _commitment, uint256 _nonce
     ) external onlyExistentPublications(_publicationId) onlyPublicationJurors(_publicationId) {
         require(timeToFinishCommitPhase(_publicationId) > 0, "Vote commit phase has already finished");
         require(_nonce >= publications[_publicationId].votation.votes[msg.sender].nonce, "Nonce must be greater than the last one");
