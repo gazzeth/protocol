@@ -5,6 +5,7 @@ import "@openzeppelin/contracts/drafts/EIP712.sol";
 import "@openzeppelin/contracts/math/SafeMath.sol";
 import "./interfaces/IDai.sol";
 import "./interfaces/IProofOfHumanity.sol";
+import "./interfaces/IRNG.sol";
 import "./Gazzeth.sol";
 
 contract Protocol is EIP712 {
@@ -12,7 +13,7 @@ contract Protocol is EIP712 {
     using SafeMath for uint256;
 
     modifier onlyExistentPublications(uint256 _publicationId) {
-        require(_publicationId < nextPublicationId, "Publication does not exist");
+        require(_publicationId < publicationId, "Publication does not exist");
         _;
     }
 
@@ -65,9 +66,10 @@ contract Protocol is EIP712 {
     Gazzeth gazzeth;
     IDai dai;
     IProofOfHumanity proofOfHumanity;
+    IRNG rng;
     uint256 minTopicJurorsQuantity;
     uint256 votingJurorsQuantity;
-    uint256 nextPublicationId;
+    uint256 publicationId;
     mapping (uint256 => Publication) publications;
     mapping (uint256 => Topic) topics;
 
@@ -75,12 +77,14 @@ contract Protocol is EIP712 {
         Gazzeth _gazzeth,
         IDai _dai,
         IProofOfHumanity _proofOfHumanity,
+        IRNG _rng,
         uint256 _minTopicJurorsQuantity,
         uint256 _votingJurorsQuantity
     ) EIP712("Protocol", "1") {
         gazzeth = _gazzeth;
         dai = _dai;
         proofOfHumanity = _proofOfHumanity;
+        rng = _rng;
         minTopicJurorsQuantity = _minTopicJurorsQuantity;
         votingJurorsQuantity = _votingJurorsQuantity;
         REVEAL_VOTE_TYPEHASH = keccak256("RevealVote(uint256 publicationId,VoteValue vote)");
@@ -102,15 +106,15 @@ contract Protocol is EIP712 {
         require(topics[_topicId].active, "Inactive topic");
         require(topics[_topicId].jurorQuantity >= minTopicJurorsQuantity, "Insuficient jurors subscribed to the topic");
         require(dai.balanceOf(msg.sender) >= topics[_topicId].publishPrice, "Insuficient DAI to publish");
-        Publication storage publication = publications[nextPublicationId];
+        Publication storage publication = publications[publicationId];
         publication.hash = _publicationHash;
         publication.author = msg.sender;
         publication.publishDate = block.timestamp;
         publication.topicId = _topicId;
-        // publication.votation.jurors = chooseJurors(_topic);
+        setJurors(publicationId);
         dai.permit(msg.sender, address(this), _nonce, _expiry, true, _v, _r, _s);
         dai.transferFrom(msg.sender, address(this), topics[_topicId].publishPrice);
-        return nextPublicationId++;
+        return publicationId++;
     }
 
     /**
@@ -174,5 +178,13 @@ contract Protocol is EIP712 {
         uint256 publishDate = publications[_publicationId].publishDate;
         uint256 phaseDuration = topics[publications[_publicationId].topicId].revealPhaseDuration;
         return publishDate + phaseDuration >= block.timestamp ? 0 : block.timestamp - (publishDate + phaseDuration);
+    }
+
+    function setJurors(uint256 _publicationId) internal {
+        uint256[] memory randoms = rng.getRandomNumbers(votingJurorsQuantity);
+        for (uint256 i = 0; i < votingJurorsQuantity; i++) {
+            // topics[publications[_publicationId].topicId].jurors[randoms[i]];
+            publications[_publicationId].votation.jurors[address(this)] = true;
+        }
     }
 }
