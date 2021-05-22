@@ -44,34 +44,37 @@ contract Protocol is EIP712 {
     struct Publication {
         string hash;
         address author;
-        uint256 topicId;
+        string topicId;
         uint256 publishDate;
         Votation votation;
     }
 
     struct Topic {
-        string name;
-        string description;
-        bool active;
+        bool created;
+        bool closed;
         uint256 publishPrice;
         uint256 jurorPrice;
         uint256 commitPhaseDuration;
         uint256 revealPhaseDuration;
-        mapping (address => bool) jurors;
+        mapping (address => uint256) jurorTimes;
         uint256 jurorQuantity;
     }
 
     bytes32 immutable REVEAL_VOTE_TYPEHASH;
+    uint256 immutable MIN_TOPIC_JURORS_QTY;
+    uint256 immutable VOTING_JURORS_QTY;
+    uint256 immutable DEFAULT_PUBLISH_PRICE;
+    uint256 immutable DEFAULT_JUROR_PRICE;
+    uint256 immutable DEFAULT_COMMIT_DURATION;
+    uint256 immutable DEFAULT_REVEAL_DURATION;
 
     Gazzeth gazzeth;
     IDai dai;
     IProofOfHumanity proofOfHumanity;
     IRNG rng;
-    uint256 minTopicJurorsQuantity;
-    uint256 votingJurorsQuantity;
     uint256 publicationId;
     mapping (uint256 => Publication) publications;
-    mapping (uint256 => Topic) topics;
+    mapping (string => Topic) topics;
 
     constructor(
         Gazzeth _gazzeth,
@@ -79,14 +82,22 @@ contract Protocol is EIP712 {
         IProofOfHumanity _proofOfHumanity,
         IRNG _rng,
         uint256 _minTopicJurorsQuantity,
-        uint256 _votingJurorsQuantity
+        uint256 _votingJurorsQuantity,
+        uint256 _defaultPublishPrice,
+        uint256 _defaultJurorPrice,
+        uint256 _defaultCommitDuration,
+        uint256 _defaultRevealDuration
     ) EIP712("Protocol", "1") {
         gazzeth = _gazzeth;
         dai = _dai;
         proofOfHumanity = _proofOfHumanity;
         rng = _rng;
-        minTopicJurorsQuantity = _minTopicJurorsQuantity;
-        votingJurorsQuantity = _votingJurorsQuantity;
+        MIN_TOPIC_JURORS_QTY = _minTopicJurorsQuantity;
+        VOTING_JURORS_QTY = _votingJurorsQuantity;
+        DEFAULT_PUBLISH_PRICE = _defaultPublishPrice;
+        DEFAULT_JUROR_PRICE = _defaultJurorPrice;
+        DEFAULT_REVEAL_DURATION = _defaultRevealDuration;
+        DEFAULT_COMMIT_DURATION = _defaultCommitDuration;
         REVEAL_VOTE_TYPEHASH = keccak256("RevealVote(uint256 publicationId,VoteValue vote)");
     }
 
@@ -96,36 +107,28 @@ contract Protocol is EIP712 {
 
     function publish(
         string calldata _publicationHash,
-        uint256 _topicId,
+        string calldata _topicId,
         uint256 _nonce,
         uint256 _expiry,
         uint8 _v,
         bytes32 _r,
         bytes32 _s
     ) external returns (uint256) {
-        require(topics[_topicId].active, "Inactive topic");
-        require(topics[_topicId].jurorQuantity >= minTopicJurorsQuantity, "Insuficient jurors subscribed to the topic");
+        require(topics[_topicId].created, "Unexistent topic");
+        require(!topics[_topicId].closed, "Closed topic");
+        require(topics[_topicId].jurorQuantity >= MIN_TOPIC_JURORS_QTY, "Insuficient jurors subscribed to the topic");
         require(dai.balanceOf(msg.sender) >= topics[_topicId].publishPrice, "Insuficient DAI to publish");
         Publication storage publication = publications[publicationId];
         publication.hash = _publicationHash;
         publication.author = msg.sender;
         publication.publishDate = block.timestamp;
         publication.topicId = _topicId;
-        setJurors(publicationId);
+        selectJurors(publicationId);
         dai.permit(msg.sender, address(this), _nonce, _expiry, true, _v, _r, _s);
         dai.transferFrom(msg.sender, address(this), topics[_topicId].publishPrice);
         return publicationId++;
     }
 
-    /**
-     ** commitment = keccak256(v,r,s), With v, r & s parts of ECDSA signature of _hashTypedDataV4(hashStruct)
-     ** Where hashStruct = keccak256(
-     **                       keccak256("RevealVote(uint256 publicationId,VoteValue vote,uint256 nonce)"),
-     **                       publicationId,
-     **                       vote,
-     **                       nonce
-     **                    )
-     */
     function commitVote(
         uint256 _publicationId, bytes32 _commitment, uint256 _nonce
     ) external onlyExistentPublications(_publicationId) onlyPublicationJurors(_publicationId) {
@@ -180,11 +183,45 @@ contract Protocol is EIP712 {
         return publishDate + phaseDuration >= block.timestamp ? 0 : block.timestamp - (publishDate + phaseDuration);
     }
 
-    function setJurors(uint256 _publicationId) internal {
-        uint256[] memory randoms = rng.getRandomNumbers(votingJurorsQuantity);
-        for (uint256 i = 0; i < votingJurorsQuantity; i++) {
+    function selectJurors(uint256 _publicationId) internal {
+        uint256[] memory randoms = rng.getRandomNumbers(VOTING_JURORS_QTY);
+        for (uint256 i = 0; i < VOTING_JURORS_QTY; i++) {
             // topics[publications[_publicationId].topicId].jurors[randoms[i]];
             publications[_publicationId].votation.jurors[address(this)] = true;
         }
+    }
+
+    function setAsJuror(
+        string calldata _topicId, uint256 _times, uint256 _nonce, uint256 _expiry, uint8 _v, bytes32 _r, bytes32 _s
+    ) external {
+        if (!topics[_topicId].created) {
+            topics[_topicId].created = true;
+            topics[_topicId].publishPrice = DEFAULT_PUBLISH_PRICE;
+            topics[_topicId].jurorPrice = DEFAULT_JUROR_PRICE;
+            topics[_topicId].commitPhaseDuration = DEFAULT_COMMIT_DURATION;
+            topics[_topicId].revealPhaseDuration = DEFAULT_REVEAL_DURATION;
+        }
+        if (topics[_topicId].jurorTimes[msg.sender] > _times) {
+            if (_times == 0) {
+                topics[_topicId].jurorQuantity--;
+            }
+            // Note: lowering topic jurorPrice must transfer the DAI left over according to new price for each juror
+            dai.transferFrom(
+                address(this), msg.sender, (topics[_topicId].jurorTimes[msg.sender] - _times) * topics[_topicId].jurorPrice
+            );
+        } else if (topics[_topicId].jurorTimes[msg.sender] < _times) {
+            require(
+                dai.balanceOf(msg.sender) >= (_times - topics[_topicId].jurorTimes[msg.sender]) * topics[_topicId].jurorPrice,
+                "Insuficient DAI to be juror that quantity of times"
+            );
+            if (topics[_topicId].jurorTimes[msg.sender] == 0) {
+                topics[_topicId].jurorQuantity++;
+            }
+            dai.permit(msg.sender, address(this), _nonce, _expiry, true, _v, _r, _s);
+            dai.transferFrom(
+                msg.sender, address(this), (_times - topics[_topicId].jurorTimes[msg.sender]) * topics[_topicId].jurorPrice
+            );
+        }
+        topics[_topicId].jurorTimes[msg.sender] = _times;
     }
 }
