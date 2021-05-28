@@ -1,11 +1,11 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: GPL-3.0
 pragma solidity ^0.7.0;
 
 import "@openzeppelin/contracts/drafts/EIP712.sol";
 import "@openzeppelin/contracts/math/SafeMath.sol";
 import "./interfaces/IDai.sol";
 import "./interfaces/IProofOfHumanity.sol";
-import "./interfaces/IRNG.sol";
+import "./interfaces/IRng.sol";
 import "./Gazzeth.sol";
 
 contract Protocol is EIP712 {
@@ -22,13 +22,38 @@ contract Protocol is EIP712 {
         _;
     }
 
+    event JurorSubscription(address indexed _juror, string indexed _topic, uint256 _times);
+    
+    event VoteReveal(address indexed _juror, uint256 indexed _publicationId, uint256 indexed voteValue, string justification);
+
+    event VoteCommitment(address indexed _juror, uint256 indexed _publicationId, bytes32 _commitment);
+
+    event PublicationSubmission(
+        uint256 indexed _publicationId,
+        address indexed _author,
+        string indexed _topicId,
+        address[] _jurors,
+        string _hash,
+        uint256 _publishDate
+    );
+
+    event TopicCreation(
+        string indexed _topicId,
+        uint256 _priceToPublish,
+        uint256 _priceToBeJuror,
+        uint256 _authorReward,
+        uint256 _jurorReward,
+        uint256 _commitPhaseDuration,
+        uint256 _revealPhaseDuration
+    );
+
     enum VoteValue {
         None,
         True,
         False,
         Unqualified
     }
-    
+
     struct Vote {
         uint256 nonce;
         VoteValue value;
@@ -64,28 +89,28 @@ contract Protocol is EIP712 {
         uint256 jurorReward;
         uint256 commitPhaseDuration;
         uint256 revealPhaseDuration;
+        uint256 jurorQuantity;
+        address[] selectableJurors;
         mapping (address => uint256) jurorTimes;
         mapping (address => uint256) jurorSelectedTimes;
-        address[] selectableJurors;
-        uint256 jurorQuantity;
     }
 
-    bytes32 immutable REVEAL_VOTE_TYPEHASH;
-    uint256 immutable MIN_TOPIC_JURORS_QTY;
-    uint256 immutable VOTING_JURORS_QTY;
-    uint256 immutable DEFAULT_PRICE_TO_PUBLISH;
-    uint256 immutable DEFAULT_PRICE_TO_BE_JUROR;
-    uint256 immutable DEFAULT_AUTHOR_REWARD;
-    uint256 immutable DEFAULT_JUROR_REWARD;
-    uint256 immutable DEFAULT_COMMIT_DURATION;
-    uint256 immutable DEFAULT_REVEAL_DURATION;
+    bytes32 immutable public REVEAL_VOTE_TYPEHASH;
+    uint256 immutable public MIN_TOPIC_JURORS_QTY;
+    uint256 immutable public VOTING_JURORS_QTY;
+    uint256 immutable public DEFAULT_PRICE_TO_PUBLISH;
+    uint256 immutable public DEFAULT_PRICE_TO_BE_JUROR;
+    uint256 immutable public DEFAULT_AUTHOR_REWARD;
+    uint256 immutable public DEFAULT_JUROR_REWARD;
+    uint256 immutable public DEFAULT_COMMIT_DURATION;
+    uint256 immutable public DEFAULT_REVEAL_DURATION;
 
-    Gazzeth gazzeth;
-    IDai dai;
-    IProofOfHumanity proofOfHumanity;
-    IRNG rng;
-    uint256 publicationId;
-    uint256 daiInTreasury;
+    Gazzeth public gazzeth;
+    IDai public dai;
+    IProofOfHumanity public proofOfHumanity;
+    IRng public rng;
+    uint256 public publicationId;
+    uint256 public daiInTreasury;
     mapping (uint256 => Publication) publications;
     mapping (string => Topic) topics;
 
@@ -93,7 +118,7 @@ contract Protocol is EIP712 {
         Gazzeth _gazzeth,
         IDai _dai,
         IProofOfHumanity _proofOfHumanity,
-        IRNG _rng,
+        IRng _rng,
         uint256 _minTopicJurorsQuantity,
         uint256 _votingJurorsQuantity,
         uint256 _defaultPriceToPublish,
@@ -146,6 +171,7 @@ contract Protocol is EIP712 {
             increaseJurorTimes(_topicId, _times, _nonce, _expiry, _v, _r, _s);
         }
         topics[_topicId].jurorTimes[msg.sender] = _times;
+        JurorSubscription(msg.sender, _topicId, _times);
     }
 
     function publish(
@@ -170,6 +196,9 @@ contract Protocol is EIP712 {
         publication.voting.voteCounter = [VOTING_JURORS_QTY, 0, 0, 0];
         dai.permit(msg.sender, address(this), _nonce, _expiry, true, _v, _r, _s);
         dai.transferFrom(msg.sender, address(this), topics[_topicId].priceToPublish);
+        emit PublicationSubmission(
+            publicationId, msg.sender, _topicId, publications[publicationId].voting.jurors, _publicationHash, block.timestamp
+        );
         return publicationId++;
     }
 
@@ -184,6 +213,7 @@ contract Protocol is EIP712 {
         }
         publications[_publicationId].voting.votes[msg.sender].commitment = _commitment;
         publications[_publicationId].voting.votes[msg.sender].nonce = _nonce + 1;
+        emit VoteCommitment(msg.sender, _publicationId, _commitment);
     }
 
     function revealVote(
@@ -216,6 +246,7 @@ contract Protocol is EIP712 {
             publications[_publicationId].voting.winningVote == _vote;
             publications[_publicationId].voting.maxVoteCount = publications[_publicationId].voting.voteCounter[voteInt];
         }
+        emit VoteReveal(msg.sender, _publicationId, uint256(_vote), _justification);
     }
 
     function withdrawRewards(uint256 _publicationId) external onlyExistentPublications(_publicationId) {
@@ -290,6 +321,15 @@ contract Protocol is EIP712 {
         topics[_topicId].jurorReward = DEFAULT_JUROR_REWARD;
         topics[_topicId].commitPhaseDuration = DEFAULT_COMMIT_DURATION;
         topics[_topicId].revealPhaseDuration = DEFAULT_REVEAL_DURATION;
+        emit TopicCreation(
+            _topicId,
+            DEFAULT_PRICE_TO_PUBLISH,
+            DEFAULT_PRICE_TO_BE_JUROR,
+            DEFAULT_AUTHOR_REWARD,
+            DEFAULT_JUROR_REWARD,
+            DEFAULT_COMMIT_DURATION,
+            DEFAULT_REVEAL_DURATION
+        );
     }
 
     function decreaseJurorTimes(string calldata _topicId, uint256 _times) internal {
