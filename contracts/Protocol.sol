@@ -166,9 +166,9 @@ contract Protocol is EIP712 {
      * @return An integer representing seconds left to finish voting commit phase.
      */
     function timeToFinishCommitPhase(uint256 _publicationId) public view returns (uint256) {
-        uint256 publishDate = publications[_publicationId].publishDate;
-        uint256 phaseDuration = topics[publications[_publicationId].topicId].commitPhaseDuration;
-        return publishDate + phaseDuration >= block.timestamp ? 0 : block.timestamp - (publishDate + phaseDuration);
+        return timeToDeadlineTimestamp(
+            publications[_publicationId].publishDate + topics[publications[_publicationId].topicId].commitPhaseDuration
+        );
     }
 
     /**
@@ -177,9 +177,11 @@ contract Protocol is EIP712 {
      * @return An integer representing seconds left to finish voting reveal phase.
      */
     function timeToFinishRevealPhase(uint256 _publicationId) public view returns (uint256) {
-        uint256 publishDate = publications[_publicationId].publishDate;
-        uint256 phaseDuration = topics[publications[_publicationId].topicId].revealPhaseDuration;
-        return publishDate + phaseDuration >= block.timestamp ? 0 : block.timestamp - (publishDate + phaseDuration);
+        return timeToDeadlineTimestamp(
+            publications[_publicationId].publishDate
+                + topics[publications[_publicationId].topicId].commitPhaseDuration
+                + topics[publications[_publicationId].topicId].revealPhaseDuration
+        );
     }
 
     /**
@@ -416,6 +418,15 @@ contract Protocol is EIP712 {
     function isNewWinningVote(uint256 _publicationId, uint256 _vote) internal view returns (bool) {
         return publications[_publicationId].voting.voteCounter[_vote] 
             > publications[_publicationId].voting.maxVoteCount;
+    }
+
+    /**
+     * @dev Gets the time left to a given deadline.
+     * @param _deadlineTimestamp The deadline where to obtain the time left.
+     * @return An integer representing seconds left to reach the given deadline.
+     */
+    function timeToDeadlineTimestamp(uint256 _deadlineTimestamp) internal view returns (uint256) {
+        return _deadlineTimestamp <= block.timestamp ? 0 : _deadlineTimestamp - block.timestamp;
     }
 
     /**
