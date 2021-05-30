@@ -369,7 +369,7 @@ contract Protocol is EIP712 {
             topics[topicId].jurorSelectedTimes[juror]--;
         }
         publications[_publicationId].voting.withdrawn = true;
-        emit WithdrawalPerformed(_publicationId);
+        emit Withdrawal(_publicationId);
     }
 
     /**
