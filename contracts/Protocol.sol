@@ -22,13 +22,18 @@ contract Protocol is EIP712 {
         _;
     }
 
-    event JurorSubscription(address indexed _juror, string indexed _topic, uint256 _times);
-
-    event VoteCommitment(address indexed _juror, uint256 indexed _publicationId, bytes32 _commitment);
-
-    event VoteReveal(
-        address indexed _juror, uint256 indexed _publicationId, uint256 indexed voteValue, string justification
+    event TopicCreation(
+        string indexed _topicId,
+        address indexed _founder,
+        uint256 _priceToPublish,
+        uint256 _priceToBeJuror,
+        uint256 _authorReward,
+        uint256 _jurorReward,
+        uint256 _commitPhaseDuration,
+        uint256 _revealPhaseDuration
     );
+
+    event JurorSubscription(address indexed _juror, string indexed _topicId, uint256 _times);
 
     event PublicationSubmission(
         uint256 indexed _publicationId,
@@ -39,15 +44,13 @@ contract Protocol is EIP712 {
         uint256 _publishDate
     );
 
-    event TopicCreation(
-        string indexed _topicId,
-        uint256 _priceToPublish,
-        uint256 _priceToBeJuror,
-        uint256 _authorReward,
-        uint256 _jurorReward,
-        uint256 _commitPhaseDuration,
-        uint256 _revealPhaseDuration
+    event VoteCommitment(address indexed _juror, uint256 indexed _publicationId, bytes32 _commitment);
+
+    event VoteReveal(
+        address indexed _juror, uint256 indexed _publicationId, uint256 indexed _voteValue, string _justification
     );
+
+    event Withdrawal(uint256 indexed _publicationId);
 
     enum VoteValue {
         None,
@@ -211,7 +214,7 @@ contract Protocol is EIP712 {
     ) external {
         if (!topics[_topicId].created) {
             createTopic(_topicId);
-        } 
+        }
         if (topics[_topicId].jurorTimes[msg.sender] > _times) {
             decreaseJurorTimes(_topicId, _times);
         } else if (topics[_topicId].jurorTimes[msg.sender] < _times) {
@@ -366,6 +369,7 @@ contract Protocol is EIP712 {
             topics[topicId].jurorSelectedTimes[juror]--;
         }
         publications[_publicationId].voting.withdrawn = true;
+        emit WithdrawalPerformed(_publicationId);
     }
 
     /**
@@ -471,6 +475,7 @@ contract Protocol is EIP712 {
         topics[_topicId].revealPhaseDuration = DEFAULT_REVEAL_DURATION;
         emit TopicCreation(
             _topicId,
+            msg.sender,
             DEFAULT_PRICE_TO_PUBLISH,
             DEFAULT_PRICE_TO_BE_JUROR,
             DEFAULT_AUTHOR_REWARD,
