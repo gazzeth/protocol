@@ -18,7 +18,7 @@ contract Protocol is EIP712 {
     }
 
     modifier onlyPublicationJurors(uint256 _publicationId) {
-        require(publications[_publicationId].voting.isJuror[msg.sender], "You are not a juror for this publication");
+        require(votings[_publicationId].isJuror[msg.sender], "You are not a juror for this publication");
         _;
     }
 
@@ -47,7 +47,12 @@ contract Protocol is EIP712 {
     event VoteCommitment(address indexed _juror, uint256 indexed _publicationId, bytes32 _commitment);
 
     event VoteReveal(
-        address indexed _juror, uint256 indexed _publicationId, uint256 indexed _voteValue, string _justification
+        address indexed _juror,
+        uint256 indexed _publicationId,
+        uint256 indexed _voteValue,
+        string _justification,
+        uint256[] _voteCounters,
+        uint256 _winningVote
     );
 
     event Withdrawal(uint256 indexed _publicationId);
@@ -69,7 +74,7 @@ contract Protocol is EIP712 {
     struct Voting {
         bool withdrawn;
         address[] jurors;
-        uint256[] voteCounter;
+        uint256[] voteCounters;
         uint256 maxVoteCount;
         VoteValue winningVote;
         mapping (address => bool) isJuror;
@@ -82,7 +87,6 @@ contract Protocol is EIP712 {
         address author;
         string topicId;
         uint256 publishDate;
-        Voting voting;
     }
 
     struct Topic {
@@ -115,9 +119,10 @@ contract Protocol is EIP712 {
     IProofOfHumanity public proofOfHumanity;
     IRng public rng;
     uint256 public publicationId;
-    uint256 public daiInTreasury;
-    mapping (uint256 => Publication) publications;
+    uint256 public protocolDaiBalance;
     mapping (string => Topic) topics;
+    mapping (uint256 => Publication) publications;
+    mapping (uint256 => Voting) votings;
 
     /**
      * @dev Constructor of the Gazzeth Protocol contract.
@@ -191,10 +196,10 @@ contract Protocol is EIP712 {
      * @dev Gets the next juror nonce available to use for commitment.
      * @param _juror The address of the juror corresponding to the nonce.
      * @param _publicationId The publication id corresponding to the nonce.
-     * @return The next nonce available for the given juror and publication.
+     * @return An integer representing the next nonce available for the given juror and publication.
      */
     function getCommitmentNonce(address _juror, uint256 _publicationId) external view returns (uint256) {
-        return publications[_publicationId].voting.votes[_juror].nonce;
+        return votings[_publicationId].votes[_juror].nonce;
     }
 
     /**
@@ -258,16 +263,11 @@ contract Protocol is EIP712 {
         publication.publishDate = block.timestamp;
         publication.topicId = _topicId;
         selectJurors(publicationId);
-        publication.voting.voteCounter = [VOTING_JURORS_QTY, 0, 0, 0];
+        votings[publicationId].voteCounters = [VOTING_JURORS_QTY, 0, 0, 0];
         dai.permit(msg.sender, address(this), _nonce, _expiry, true, _v, _r, _s);
         dai.transferFrom(msg.sender, address(this), topics[_topicId].priceToPublish);
         emit PublicationSubmission(
-            publicationId,
-            msg.sender,
-            _topicId,
-            publications[publicationId].voting.jurors,
-            _publicationHash,
-            block.timestamp
+            publicationId, msg.sender, _topicId, votings[publicationId].jurors, _publicationHash, block.timestamp
         );
         return publicationId++;
     }
@@ -282,13 +282,10 @@ contract Protocol is EIP712 {
         uint256 _publicationId, bytes32 _commitment, uint256 _nonce
     ) external onlyExistentPublications(_publicationId) onlyPublicationJurors(_publicationId) {
         require(timeToFinishCommitPhase(_publicationId) > 0, "Vote commit phase has already finished");
-        require(
-            _nonce >= publications[_publicationId].voting.votes[msg.sender].nonce,
-            "Nonce must be greater than the last one"
-        );
+        require(_nonce >= votings[_publicationId].votes[msg.sender].nonce, "Nonce must be greater than the last one");
         require(proofOfHumanity.isRegistered(msg.sender), "You must be registered in Proof of Humanity");
-        publications[_publicationId].voting.votes[msg.sender].commitment = _commitment;
-        publications[_publicationId].voting.votes[msg.sender].nonce = _nonce + 1;
+        votings[_publicationId].votes[msg.sender].commitment = _commitment;
+        votings[_publicationId].votes[msg.sender].nonce = _nonce + 1;
         emit VoteCommitment(msg.sender, _publicationId, _commitment);
     }
 
@@ -306,13 +303,13 @@ contract Protocol is EIP712 {
     function revealVote(
         uint256 _publicationId, VoteValue _vote, string calldata _justification, uint8 _v, bytes32 _r, bytes32 _s
     ) external onlyExistentPublications(_publicationId) onlyPublicationJurors(_publicationId) returns (bool) {
-        require(publications[_publicationId].voting.votes[msg.sender].nonce > 0, "Missing vote commitment");
+        require(votings[_publicationId].votes[msg.sender].nonce > 0, "Missing vote commitment");
         require(timeToFinishRevealPhase(_publicationId) > 0, "Vote reveal phase has already finished");
         require(_vote != VoteValue.None, "Vote must be different than 'None'");
-        require(publications[_publicationId].voting.votes[msg.sender].value == VoteValue.None, "Reveal already done");
-        require(!publications[_publicationId].voting.isPenalized[msg.sender], "Penalized juror");
+        require(votings[_publicationId].votes[msg.sender].value == VoteValue.None, "Reveal already done");
+        require(!votings[_publicationId].isPenalized[msg.sender], "Penalized juror");
         require(
-            publications[_publicationId].voting.votes[msg.sender].commitment == keccak256(abi.encode(_v, _r, _s)),
+            votings[_publicationId].votes[msg.sender].commitment == keccak256(abi.encode(_v, _r, _s)),
             "Invalid vote reveal: revealed values do not match commitment"
         );
         require(
@@ -320,26 +317,13 @@ contract Protocol is EIP712 {
             "Invalid vote reveal: invalid signature"
         );
         if (timeToFinishCommitPhase(_publicationId) > 0) {
-            publications[_publicationId].voting.isPenalized[msg.sender] = true;
-            emit VoteReveal(msg.sender, _publicationId, uint256(VoteValue.None), "Penalized juror");
+            votings[_publicationId].isPenalized[msg.sender] = true;
         } else {
             require(proofOfHumanity.isRegistered(msg.sender), "You must be registered in Proof of Humanity");
-            publications[_publicationId].voting.voteCounter[uint256(VoteValue.None)]--;
-            publications[_publicationId].voting.voteCounter[uint256(_vote)]++;
-            publications[_publicationId].voting.votes[msg.sender].value = _vote;
-            publications[_publicationId].voting.votes[msg.sender].justification = _justification;
-            if (publications[_publicationId].voting.winningVote == _vote) {
-                publications[_publicationId].voting.maxVoteCount++;
-            } else if (isTied(_publicationId, uint256(_vote))) {
-                publications[_publicationId].voting.winningVote == VoteValue.None;
-            } else if (isNewWinningVote(_publicationId, uint256(_vote))) {
-                publications[_publicationId].voting.winningVote == _vote;
-                publications[_publicationId].voting.maxVoteCount 
-                    = publications[_publicationId].voting.voteCounter[uint256(_vote)];
-            }
-            emit VoteReveal(msg.sender, _publicationId, uint256(_vote), _justification);
+            countVote(_publicationId, _vote, _justification);
         }
-        return publications[_publicationId].voting.isPenalized[msg.sender];
+        emitVoteRevealEvent(_publicationId, _vote, _justification);
+        return votings[_publicationId].isPenalized[msg.sender];
     }
 
     /**
@@ -348,14 +332,14 @@ contract Protocol is EIP712 {
      */
     function withdrawRewards(uint256 _publicationId) external onlyExistentPublications(_publicationId) {
         require(timeToFinishRevealPhase(_publicationId) == 0, "Vote reveal phase has not finished yet");
-        require(!publications[_publicationId].voting.withdrawn, "Publication rewards already withdrawn");
+        require(!votings[_publicationId].withdrawn, "Publication rewards already withdrawn");
         string memory topicId = publications[_publicationId].topicId;
-        if (publications[_publicationId].voting.winningVote == VoteValue.True) {
+        if (votings[_publicationId].winningVote == VoteValue.True) {
             dai.transferFrom(address(this), publications[_publicationId].author, topics[topicId].priceToPublish);
             gazzeth.mint(publications[_publicationId].author, topics[topicId].authorReward);
         }
-        for (uint256 i = 0; i < publications[_publicationId].voting.jurors.length; i++) {
-            address juror = publications[_publicationId].voting.jurors[i];
+        for (uint256 i = 0; i < votings[_publicationId].jurors.length; i++) {
+            address juror = votings[_publicationId].jurors[i];
             if (jurorMustBeRewarded(_publicationId, juror)) {
                 if (topics[topicId].jurorSelectedTimes[juror] == topics[topicId].jurorTimes[juror]) {
                     topics[topicId].selectableJurors.push(juror);
@@ -364,11 +348,11 @@ contract Protocol is EIP712 {
             } else {
                 topics[topicId].jurorTimes[juror]--;
                 // TODO: Take in account the line below when topic prices can be changed by governance
-                daiInTreasury += topics[topicId].priceToBeJuror;
+                protocolDaiBalance += topics[topicId].priceToBeJuror;
             }
             topics[topicId].jurorSelectedTimes[juror]--;
         }
-        publications[_publicationId].voting.withdrawn = true;
+        votings[_publicationId].withdrawn = true;
         emit Withdrawal(_publicationId);
     }
 
@@ -379,10 +363,9 @@ contract Protocol is EIP712 {
      * @return A boolean indicating if juror must be rewarded or not.
      */
     function jurorMustBeRewarded(uint256 _publicationId, address _juror) internal view returns (bool) {
-        return !publications[_publicationId].voting.isPenalized[_juror]
-            && publications[_publicationId].voting.votes[_juror].value != VoteValue.None 
-            && publications[_publicationId].voting.votes[_juror].value 
-                == publications[_publicationId].voting.winningVote;
+        return !votings[_publicationId].isPenalized[_juror]
+            && votings[_publicationId].votes[_juror].value != VoteValue.None 
+            && votings[_publicationId].votes[_juror].value == votings[_publicationId].winningVote;
     }
 
     /**
@@ -393,35 +376,46 @@ contract Protocol is EIP712 {
      */
     function hashStruct(uint256 _publicationId, VoteValue _vote) internal view returns (bytes32) {
         return keccak256(
-            abi.encode(
-                REVEAL_VOTE_TYPEHASH,
-                _publicationId,
-                _vote,
-                publications[_publicationId].voting.votes[msg.sender].nonce - 1
-            )
+            abi.encode(REVEAL_VOTE_TYPEHASH, _publicationId, _vote, votings[_publicationId].votes[msg.sender].nonce - 1)
         );
     }
 
     /**
-     * @dev Verifies where the max vote count is equal to the given vote count resulting in a tie.
-     * @param _publicationId The publication id where votes correspond to.
-     * @param _vote The vote which count wants to be verified agains the max count.
-     * @return A boolean indicating if is a tie or not.
+     * @dev Counts the given vote for the given publication updating voting statuses.
+     * @param _publicationId The publication id to vote for.
+     * @param _vote The actual vote value.
+     * @param _justification The justification for the given vote value.
      */
-    function isTied(uint256 _publicationId, uint256 _vote) internal view returns (bool) {
-        return publications[_publicationId].voting.voteCounter[_vote] 
-            == publications[_publicationId].voting.maxVoteCount;
+    function countVote(uint256 _publicationId, VoteValue _vote, string calldata _justification) internal {
+        votings[_publicationId].voteCounters[uint256(VoteValue.None)]--;
+        votings[_publicationId].voteCounters[uint256(_vote)]++;
+        votings[_publicationId].votes[msg.sender].value = _vote;
+        votings[_publicationId].votes[msg.sender].justification = _justification;
+        if (votings[_publicationId].winningVote == _vote) {
+            votings[_publicationId].maxVoteCount++;
+        } else if (votings[_publicationId].voteCounters[uint256(_vote)] == votings[_publicationId].maxVoteCount) {
+            votings[_publicationId].winningVote == VoteValue.None;
+        } else if (votings[_publicationId].voteCounters[uint256(_vote)] > votings[_publicationId].maxVoteCount) {
+            votings[_publicationId].winningVote == _vote;
+            votings[_publicationId].maxVoteCount = votings[_publicationId].voteCounters[uint256(_vote)];
+        }
     }
 
     /**
-     * @dev Verifies where the max vote count is less than the given vote count putting the last as the winning one.
-     * @param _publicationId The publication id where votes correspond to.
-     * @param _vote The vote which count wants to be verified agains the max count.
-     * @return A boolean indicating if the given vote is the new winning vote or not.
+     * @dev Emits the VoteReveal event. Made as a separated function to avoid 'Stack too deep' error.
+     * @param _publicationId The publication id to vote for.
+     * @param _vote The actual vote value.
+     * @param _justification The justification for the given vote value.
      */
-    function isNewWinningVote(uint256 _publicationId, uint256 _vote) internal view returns (bool) {
-        return publications[_publicationId].voting.voteCounter[_vote] 
-            > publications[_publicationId].voting.maxVoteCount;
+    function emitVoteRevealEvent(uint256 _publicationId, VoteValue _vote, string calldata _justification) internal {
+        emit VoteReveal(
+            msg.sender,
+            _publicationId,
+            votings[_publicationId].isPenalized[msg.sender] ? uint256(VoteValue.None) : uint256(_vote),
+            votings[_publicationId].isPenalized[msg.sender] ? "Penalized juror" : _justification,
+            votings[_publicationId].voteCounters,
+            uint256(votings[_publicationId].winningVote)
+        );
     }
 
     /**
@@ -445,14 +439,13 @@ contract Protocol is EIP712 {
             uint256 selectedJurorIndex = randoms[i] % selectableJurorsLength;
             address selectedJuror = topics[topicId].selectableJurors[selectedJurorIndex];
             topics[topicId].jurorSelectedTimes[selectedJuror]++;
-            publications[_publicationId].voting.jurors.push(selectedJuror);
-            publications[_publicationId].voting.isJuror[selectedJuror] = true;
+            votings[_publicationId].jurors.push(selectedJuror);
+            votings[_publicationId].isJuror[selectedJuror] = true;
             topics[topicId].selectableJurors[selectedJurorIndex] 
                 = topics[topicId].selectableJurors[selectableJurorsLength - 1];
             if (topics[topicId].jurorSelectedTimes[selectedJuror] == topics[topicId].jurorTimes[selectedJuror]) {
-                uint256 lastIndex = topics[topicId].selectableJurors.length - 1;
                 topics[topicId].selectableJurors[selectableJurorsLength - 1] 
-                    = topics[topicId].selectableJurors[lastIndex];
+                    = topics[topicId].selectableJurors[topics[topicId].selectableJurors.length - 1];
                 topics[topicId].selectableJurors.pop();
             } else {
                 topics[topicId].selectableJurors[selectableJurorsLength - 1] = selectedJuror;
