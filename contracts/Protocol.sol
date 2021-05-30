@@ -120,9 +120,9 @@ contract Protocol is EIP712 {
     IRng public rng;
     uint256 public publicationId;
     uint256 public protocolDaiBalance;
-    mapping (string => Topic) topics;
-    mapping (uint256 => Publication) publications;
-    mapping (uint256 => Voting) votings;
+    mapping (string => Topic) public topics;
+    mapping (uint256 => Publication) public publications;
+    mapping (uint256 => Voting) public votings;
 
     /**
      * @dev Constructor of the Gazzeth Protocol contract.
