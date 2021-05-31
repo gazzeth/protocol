@@ -488,7 +488,7 @@ contract Protocol is EIP712 {
             topics[_topicId].jurorSelectedTimes[msg.sender] <= _times,
             "You must finish some votings before decreasing times"
         );
-        if (_times == 0 && topics[_topicId].jurorTimes[msg.sender] > 0) {
+        if (_times == 0) {
             topics[_topicId].jurorQuantity--;
             // This loop can be avoided maintaining a mapping from juror address to its index in selectableJurors array
             uint256 jurorIndex;
