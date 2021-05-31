@@ -2,7 +2,7 @@ async function main() {
     const [sender] = await ethers.getSigners();
     console.log("Calling contract with the account:", sender.address);
     const Protocol = await ethers.getContractFactory("Protocol");
-    const protocolAddress = '0xFa69eEf3065143ef233aA25f02beAA96d3B8BA99';
+    const protocolAddress = '0x56908e5B870aD339F90332f4DA4470953365cC9E';
     const protocol = Protocol.attach(protocolAddress);
     const topicId = 'Worldwide/Ethereum/Airdrops';
     const times = '0';
