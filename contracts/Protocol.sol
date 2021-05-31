@@ -528,6 +528,7 @@ contract Protocol is EIP712 {
         require(dai.balanceOf(msg.sender) >= daiToDeposit, "Insuficient DAI to be juror that number of times");
         if (topics[_topicId].jurorTimes[msg.sender] == 0) {
             topics[_topicId].jurorQuantity++;
+            topics[_topicId].selectableJurors.push(msg.sender);
         }
         dai.permit(msg.sender, address(this), _nonce, _expiry, true, _v, _r, _s);
         dai.transferFrom(msg.sender, address(this), daiToDeposit);
