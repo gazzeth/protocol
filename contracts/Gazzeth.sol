@@ -4,8 +4,9 @@ pragma solidity ^0.7.0;
 import "@openzeppelin/contracts/math/SafeMath.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/drafts/ERC20Permit.sol";
+import "./interfaces/IErc20PermitMintable.sol";
 
-contract Gazzeth is ERC20, ERC20Permit {
+contract Gazzeth is ERC20, ERC20Permit, IErc20PermitMintable {
 
     using SafeMath for uint256;
 
@@ -27,12 +28,12 @@ contract Gazzeth is ERC20, ERC20Permit {
         protocolContractAddressSet = true;
     }
     
-    function mint(address _toAccount, uint256 _amount) external {
+    function mint(address _toAccount, uint256 _amount) override external {
         require(_msgSender() == protocolContract, "Only Gazzeth protocol contract can call this function");
         _mint(_toAccount, _amount); 
     }
 
-    function burn(address _fromAccount, uint256 _amount) external {
+    function burn(address _fromAccount, uint256 _amount) override external {
         if (_msgSender() != protocolContract && _fromAccount != _msgSender()) {
             uint256 decresedAllowance = allowance(_fromAccount, _msgSender()).sub(_amount, "Insufficient allowance");
             _approve(_fromAccount, _msgSender(), decresedAllowance);
