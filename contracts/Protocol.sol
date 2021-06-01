@@ -735,7 +735,7 @@ contract Protocol is EIP712 {
     ) internal {
         require(proofOfHumanity.isRegistered(_juror), "To be a juror you must be registered on Proof of Humanity");
         if (topics[_topicId].jurorTimes[_juror] == topics[_topicId].jurorSelectedTimes[_juror]) {
-            // Take in acccount that jurorTimes[_juror] == 0 always implies jurorSelectedTimes[_juror] == 0
+            // Take in account that jurorTimes[_juror] == 0 always implies jurorSelectedTimes[_juror] == 0
             topics[_topicId].selectableJurors.push(_juror);
         }
         if (topics[_topicId].jurorTimes[_juror] == 0) {
