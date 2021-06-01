@@ -6,7 +6,7 @@ import "@openzeppelin/contracts/math/SafeMath.sol";
 import "./interfaces/IDai.sol";
 import "./interfaces/IProofOfHumanity.sol";
 import "./interfaces/IRng.sol";
-import "./Gazzeth.sol";
+import "./interfaces/IErc20PermitMintable.sol";
 
 contract Protocol is EIP712 {
 
@@ -118,7 +118,7 @@ contract Protocol is EIP712 {
     uint256 immutable public DEFAULT_COMMIT_DURATION;
     uint256 immutable public DEFAULT_REVEAL_DURATION;
 
-    Gazzeth public gazzeth;
+    IErc20PermitMintable public gazzeth;
     IDai public dai;
     IProofOfHumanity public proofOfHumanity;
     IRng public rng;
@@ -144,7 +144,7 @@ contract Protocol is EIP712 {
      * @param _defaultRevealDuration Default voting reveal phase duration in seconds.
      */
     constructor(
-        Gazzeth _gazzeth,
+        IErc20PermitMintable _gazzeth,
         IDai _dai,
         IProofOfHumanity _proofOfHumanity,
         IRng _rng,
@@ -385,7 +385,6 @@ contract Protocol is EIP712 {
             topics[_topicId].selectableJurors.length >= MIN_SELECTABLE_JURORS_QTY,
             "Insuficient selectable jurors in the topic"
         );
-        require(dai.balanceOf(msg.sender) >= topics[_topicId].priceToPublish, "Insuficient DAI to publish");
         Publication storage publication = publications[publicationId];
         publication.hash = _publicationHash;
         publication.author = msg.sender;
@@ -732,7 +731,6 @@ contract Protocol is EIP712 {
     ) internal {
         require(proofOfHumanity.isRegistered(_juror), "To be a juror you must be registered on Proof of Humanity");
         uint256 daiToDeposit = (_times - topics[_topicId].jurorTimes[_juror]) * topics[_topicId].priceToBeJuror;
-        require(dai.balanceOf(_juror) >= daiToDeposit, "Insuficient DAI to be juror that number of times");
         if (topics[_topicId].jurorTimes[_juror] == topics[_topicId].jurorSelectedTimes[_juror]) {
             // Take in acccount that jurorTimes[_juror] == 0 always implies jurorSelectedTimes[_juror] == 0
             topics[_topicId].selectableJurors.push(_juror);
