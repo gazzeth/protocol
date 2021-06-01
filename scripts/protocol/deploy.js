@@ -4,7 +4,7 @@ async function main() {
     const Protocol = await ethers.getContractFactory("Protocol");
     const minutes = 60;
     const eighteenDecimalsTokenUnit = 10 ** 18;
-    const gazzeth = '0x031106A1258017C612A52cEBd70A5aEDEB79327B';
+    const gazzeth = '0x6A68F71e0469464B0C1D8A2Eb864a0486f3166Cf';
     const dai = '0x1038b262c3a786713def6797ad9cbc5fc20439e2';
     const proofOfHumanity = '0x9b1590A4D36255b3b18Bb681062FD159f809009f';
     const rng = '0xE810595b00D68c567306AB2BBE06E589c6Aa2142';
@@ -14,8 +14,8 @@ async function main() {
     const defaultPriceToBeJuror = '100000000000000000'; // 0.1 DAI
     const defaultAuthorReward = eighteenDecimalsTokenUnit.toString();
     const defaultJurorReward = eighteenDecimalsTokenUnit.toString();
-    const defaultCommitDuration = (10 * minutes).toString();
-    const defaultRevealDuration = (10 * minutes).toString(); 
+    const defaultCommitDuration = (5 * minutes).toString();
+    const defaultRevealDuration = (5 * minutes).toString(); 
     const protocol = await Protocol.deploy(
         gazzeth,
         dai,
