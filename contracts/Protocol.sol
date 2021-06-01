@@ -414,7 +414,7 @@ contract Protocol is EIP712 {
         onlyPublicationJurors(_publicationId, msg.sender)
     {
         require(timeToFinishCommitPhase(_publicationId) > 0, "Vote commit phase has already finished");
-        require(_nonce == votings[_publicationId].votes[msg.sender].nonce, "Invalid nonce");
+        require(votings[_publicationId].votes[msg.sender].nonce == _nonce, "Invalid nonce");
         require(proofOfHumanity.isRegistered(msg.sender), "You must be registered in Proof of Humanity");
         votings[_publicationId].votes[msg.sender].commitment = _commitment;
         votings[_publicationId].votes[msg.sender].nonce = _nonce + 1;
@@ -422,8 +422,8 @@ contract Protocol is EIP712 {
     }
 
     /**
-     * @dev Reveals vote for the given publication. Second phase of the commit and reveal voting scheme.
-     * The given parameters must match the last commitment performed by the juror.
+     * @dev Reveals vote for the given publication. Second phase of the commit and reveal voting scheme. The given
+     * parameters must match the last commitment performed by the juror. Calling it in commit phase penalizes you.
      * @param _publicationId The publication id to vote for.
      * @param _vote The actual vote value.
      * @param _justification The justification for the given vote value.
@@ -447,22 +447,23 @@ contract Protocol is EIP712 {
         onlyPublicationJurors(_publicationId, msg.sender)
         returns (bool) 
     {
-        require(votings[_publicationId].votes[msg.sender].nonce > 0, "Missing vote commitment");
-        require(votings[_publicationId].votes[msg.sender].nonce == _nonce, "Invalid nonce: is not the last one used");
-        require(timeToFinishRevealPhase(_publicationId) > 0, "Vote reveal phase has already finished");
-        require(_vote > uint8(VoteValue.None) && _vote <= uint8(VoteValue.Unqualified), "Invalid vote value");
-        require(votings[_publicationId].votes[msg.sender].value == VoteValue.None, "Reveal already done");
-        require(!votings[_publicationId].isPenalized[msg.sender], "Penalized juror");
-        require(
-            votings[_publicationId].votes[msg.sender].commitment == keccak256(abi.encode(_v, _r, _s)),
-            "Invalid vote reveal: revealed values do not match commitment"
-        );
-        require(
-            isValidSignature(_publicationId, msg.sender, _vote, _v, _r, _s), "Invalid vote reveal: invalid signature"
-        );
         if (timeToFinishCommitPhase(_publicationId) > 0) {
             votings[_publicationId].isPenalized[msg.sender] = true;
         } else {
+            require(votings[_publicationId].votes[msg.sender].value == VoteValue.None, "Reveal already done");
+            require(!votings[_publicationId].isPenalized[msg.sender], "Penalized juror");
+            require(votings[_publicationId].votes[msg.sender].nonce > 0, "Missing vote commitment");
+            require(votings[_publicationId].votes[msg.sender].nonce - 1 == _nonce, "Invalid nonce");
+            require(timeToFinishRevealPhase(_publicationId) > 0, "Vote reveal phase has already finished");
+            require(_vote > uint8(VoteValue.None) && _vote <= uint8(VoteValue.Unqualified), "Invalid vote value");
+            require(
+                votings[_publicationId].votes[msg.sender].commitment == keccak256(abi.encode(_v, _r, _s)),
+                "Invalid vote reveal: revealed values do not match commitment"
+            );
+            require(
+                isValidSignature(_publicationId, msg.sender, _vote, _v, _r, _s),
+                "Invalid vote reveal: invalid signature"
+            );
             require(proofOfHumanity.isRegistered(msg.sender), "You must be registered in Proof of Humanity");
             countVote(_publicationId, msg.sender, VoteValue(_vote), _justification);
         }
