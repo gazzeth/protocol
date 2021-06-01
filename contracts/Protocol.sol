@@ -3,10 +3,11 @@ pragma solidity ^0.7.0;
 
 import "@openzeppelin/contracts/drafts/EIP712.sol";
 import "@openzeppelin/contracts/math/SafeMath.sol";
+import "@openzeppelin/contracts/cryptography/ECDSA.sol";
 import "./interfaces/IDai.sol";
 import "./interfaces/IProofOfHumanity.sol";
 import "./interfaces/IRng.sol";
-import "./Gazzeth.sol";
+import "./interfaces/IErc20PermitMintable.sol";
 
 contract Protocol is EIP712 {
 
@@ -17,14 +18,18 @@ contract Protocol is EIP712 {
         _;
     }
 
-    modifier onlyPublicationJurors(uint256 _publicationId) {
-        require(votings[_publicationId].isJuror[msg.sender], "You are not a juror for this publication");
+    modifier onlyPublicationJurors(uint256 _publicationId, address _juror) {
+        require(votings[_publicationId].isJuror[_juror], "You are not a juror for this publication");
+        _;
+    }
+
+    modifier onlyExistentTopics(string calldata _topicId) {
+        require(topics[_topicId].created, "Topic does not exists");
         _;
     }
 
     event TopicCreation(
         string indexed _topicId,
-        address indexed _founder,
         uint256 _priceToPublish,
         uint256 _priceToBeJuror,
         uint256 _authorReward,
@@ -49,7 +54,7 @@ contract Protocol is EIP712 {
     event VoteReveal(
         address indexed _juror,
         uint256 indexed _publicationId,
-        uint256 indexed _voteValue,
+        uint8 indexed _voteValue,
         string _justification,
         uint256[] _voteCounters,
         uint256 _winningVote
@@ -104,8 +109,8 @@ contract Protocol is EIP712 {
         mapping (address => uint256) jurorSelectedTimes;
     }
 
-    bytes32 immutable public REVEAL_VOTE_TYPEHASH;
-    uint256 immutable public MIN_TOPIC_JURORS_QTY;
+    bytes32 immutable public VOTE_TYPEHASH;
+    uint256 immutable public MIN_SELECTABLE_JURORS_QTY;
     uint256 immutable public VOTING_JURORS_QTY;
     uint256 immutable public DEFAULT_PRICE_TO_PUBLISH;
     uint256 immutable public DEFAULT_PRICE_TO_BE_JUROR;
@@ -114,7 +119,7 @@ contract Protocol is EIP712 {
     uint256 immutable public DEFAULT_COMMIT_DURATION;
     uint256 immutable public DEFAULT_REVEAL_DURATION;
 
-    Gazzeth public gazzeth;
+    IErc20PermitMintable public gazzeth;
     IDai public dai;
     IProofOfHumanity public proofOfHumanity;
     IRng public rng;
@@ -130,7 +135,7 @@ contract Protocol is EIP712 {
      * @param _dai Address of DAI ERC20 token contract.
      * @param _proofOfHumanity Address of Proof of Humanity contract.
      * @param _rng Address of a Random Number Generator contract.
-     * @param _minTopicJurorsQuantity Minimum selectable jurors needed in a topic to publish.
+     * @param _minSelectableJurorsQuantity Minimum selectable jurors needed in a topic to publish.
      * @param _votingJurorsQuantity Number of jurors to be selected for voting a publication.
      * @param _defaultPriceToPublish Default price in DAI for publishing in a topic.
      * @param _defaultPriceToBeJuror Default price in DAI for subscribing one time as juror in a topic.
@@ -140,11 +145,11 @@ contract Protocol is EIP712 {
      * @param _defaultRevealDuration Default voting reveal phase duration in seconds.
      */
     constructor(
-        Gazzeth _gazzeth,
+        IErc20PermitMintable _gazzeth,
         IDai _dai,
         IProofOfHumanity _proofOfHumanity,
         IRng _rng,
-        uint256 _minTopicJurorsQuantity,
+        uint256 _minSelectableJurorsQuantity,
         uint256 _votingJurorsQuantity,
         uint256 _defaultPriceToPublish,
         uint256 _defaultPriceToBeJuror,
@@ -152,12 +157,12 @@ contract Protocol is EIP712 {
         uint256 _defaultJurorReward,
         uint256 _defaultCommitDuration,
         uint256 _defaultRevealDuration
-    ) EIP712("Protocol", "1") {
+    ) EIP712("Gazzeth Protocol", "1") {
         gazzeth = _gazzeth;
         dai = _dai;
         proofOfHumanity = _proofOfHumanity;
         rng = _rng;
-        MIN_TOPIC_JURORS_QTY = _minTopicJurorsQuantity;
+        MIN_SELECTABLE_JURORS_QTY = _minSelectableJurorsQuantity;
         VOTING_JURORS_QTY = _votingJurorsQuantity;
         DEFAULT_PRICE_TO_PUBLISH = _defaultPriceToPublish;
         DEFAULT_PRICE_TO_BE_JUROR = _defaultPriceToBeJuror;
@@ -165,41 +170,161 @@ contract Protocol is EIP712 {
         DEFAULT_JUROR_REWARD = _defaultJurorReward;
         DEFAULT_REVEAL_DURATION = _defaultRevealDuration;
         DEFAULT_COMMIT_DURATION = _defaultCommitDuration;
-        REVEAL_VOTE_TYPEHASH = keccak256("RevealVote(uint256 publicationId,VoteValue vote)");
+        VOTE_TYPEHASH = keccak256("Vote(uint256 publicationId,uint8 vote,uint256 nonce)");
     }
 
     /**
      * @dev Gets the time left to finish voting commit phase.
      * @param _publicationId The publication id corresponding to the publication where to obtain the deadlines.
-     * @return An integer representing seconds left to finish voting commit phase.
+     * @return An integer representing seconds left to finish voting commit phase. Zero if publication not exists.
      */
     function timeToFinishCommitPhase(uint256 _publicationId) public view returns (uint256) {
         return timeToDeadlineTimestamp(
-            publications[_publicationId].publishDate + topics[publications[_publicationId].topicId].commitPhaseDuration
+            publications[_publicationId].publishDate
+                .add(topics[publications[_publicationId].topicId].commitPhaseDuration)
         );
     }
 
     /**
      * @dev Gets the time left to finish voting reveal phase.
      * @param _publicationId The publication id corresponding to the publication where to obtain the deadlines.
-     * @return An integer representing seconds left to finish voting reveal phase.
+     * @return An integer representing seconds left to finish voting reveal phase. Zero if publication not exists.
      */
     function timeToFinishRevealPhase(uint256 _publicationId) public view returns (uint256) {
         return timeToDeadlineTimestamp(
             publications[_publicationId].publishDate
-                + topics[publications[_publicationId].topicId].commitPhaseDuration
-                + topics[publications[_publicationId].topicId].revealPhaseDuration
+                .add(topics[publications[_publicationId].topicId].commitPhaseDuration)
+                .add(topics[publications[_publicationId].topicId].revealPhaseDuration)
         );
     }
 
     /**
-     * @dev Gets the next juror nonce available to use for commitment.
+     * @dev Gets nonce juror must use for next commitment in a given publication.
      * @param _juror The address of the juror corresponding to the nonce.
      * @param _publicationId The publication id corresponding to the nonce.
-     * @return An integer representing the next nonce available for the given juror and publication.
+     * @return An integer representing the nonce.
      */
     function getCommitmentNonce(address _juror, uint256 _publicationId) external view returns (uint256) {
         return votings[_publicationId].votes[_juror].nonce;
+    }
+
+    /**
+     * @dev Gets selectable jurors in a given topic.
+     * @param _topicId The topic id where jurors corresponds to.
+     * @return An address array representing the jurors.
+     */
+    function getSelectableJurors(string calldata _topicId) 
+        external
+        view
+        onlyExistentTopics(_topicId)
+        returns (address[] memory) 
+    {
+        return topics[_topicId].selectableJurors;
+    }
+
+    /**
+     * @dev Gets juror suscribed times in a given topic.
+     * @param _topicId The topic id to get times from.
+     * @param _juror The juror address.
+     * @return An integer representing the times.
+     */
+    function getJurorTimes(string calldata _topicId, address _juror) 
+        external
+        view
+        onlyExistentTopics(_topicId)
+        returns (uint256) 
+    {
+        return topics[_topicId].jurorTimes[_juror];
+    }
+
+    /**
+     * @dev Gets juror selected times in publications of the given topic.
+     * @param _topicId The topic id where publications corresponds to.
+     * @param _juror The juror address.
+     * @return An integer representing the times.
+     */
+    function getJurorSelectedTimes(string calldata _topicId, address _juror) 
+        external
+        view
+        onlyExistentTopics(_topicId)
+        returns (uint256)
+    {
+        return topics[_topicId].jurorSelectedTimes[_juror];
+    }
+
+    /**
+     * @dev Gets juror in a given publication voting.
+     * @param _publicationId The publication id where voting corresponds to.
+     * @return An address array representing the jurors.
+     */
+    function getVotingJurors(uint256 _publicationId)
+        external
+        view
+        onlyExistentPublications(_publicationId)
+        returns (address[] memory)
+    {
+        return votings[_publicationId].jurors;
+    }
+
+    /**
+     * @dev Gets vote counters in a given publication voting.
+     * @param _publicationId The publication id where voting corresponds to.
+     * @return An integer array representing the vote counters.
+     */
+    function getVoteCounters(uint256 _publicationId)
+        external
+        view
+        onlyExistentPublications(_publicationId)
+        returns (uint256[] memory)
+    {
+        return votings[_publicationId].voteCounters;
+    }
+
+    /**
+     * @dev Verifies if address is juror in a given publication voting.
+     * @param _publicationId The publication id where voting corresponds to.
+     * @param _address The address to verify if is juror.
+     * @return A boolean indicating if address is juror or not.
+     */
+    function isJuror(uint256 _publicationId, address _address)
+        external
+        view
+        onlyExistentPublications(_publicationId)
+        returns (bool)
+    {
+        return votings[_publicationId].isJuror[_address];
+    }
+
+    /**
+     * @dev Verifies if juror is penalized for a given publication voting.
+     * @param _publicationId The publication id where voting corresponds to.
+     * @param _juror The juror address.
+     * @return A boolean indicating if juror is penalized or not.
+     */
+    function isPenalized(uint256 _publicationId, address _juror)
+        external
+        view 
+        onlyExistentPublications(_publicationId)
+        onlyPublicationJurors(_publicationId, _juror) 
+        returns (bool) 
+    {
+        return votings[_publicationId].isJuror[_juror];
+    }
+
+    /**
+     * @dev Gets vote value from juror in publication.
+     * @param _publicationId The publication id where voting corresponds to.
+     * @param _juror The juror address.
+     * @return An integer representing the vote value.
+     */
+    function getVoteValue(uint256 _publicationId, address _juror)
+        external
+        view 
+        onlyExistentPublications(_publicationId)
+        onlyPublicationJurors(_publicationId, _juror) 
+        returns (uint8) 
+    {
+        return uint8(votings[_publicationId].votes[_juror].value);
     }
 
     /**
@@ -215,18 +340,24 @@ contract Protocol is EIP712 {
      * @param _s The s parameter of ECDSA signature as defined in EIP712.
      */
     function subscribeAsJuror(
-        string calldata _topicId, uint256 _times, uint256 _nonce, uint256 _expiry, uint8 _v, bytes32 _r, bytes32 _s
+        string calldata _topicId,
+        uint256 _times,
+        uint256 _nonce,
+        uint256 _expiry,
+        uint8 _v,
+        bytes32 _r,
+        bytes32 _s
     ) external {
         if (!topics[_topicId].created) {
             createTopic(_topicId);
         }
         if (topics[_topicId].jurorTimes[msg.sender] > _times) {
-            decreaseJurorTimes(_topicId, _times);
+            decreaseJurorTimes(_topicId, msg.sender, _times);
         } else if (topics[_topicId].jurorTimes[msg.sender] < _times) {
-            increaseJurorTimes(_topicId, _times, _nonce, _expiry, _v, _r, _s);
+            increaseJurorTimes(_topicId, msg.sender, _times, _nonce, _expiry, _v, _r, _s);
         }
         topics[_topicId].jurorTimes[msg.sender] = _times;
-        JurorSubscription(msg.sender, _topicId, _times);
+        emit JurorSubscription(msg.sender, _topicId, _times);
     }
 
     /**
@@ -253,10 +384,9 @@ contract Protocol is EIP712 {
         require(topics[_topicId].created, "Unexistent topic");
         require(!topics[_topicId].closed, "Closed topic");
         require(
-            topics[_topicId].selectableJurors.length >= MIN_TOPIC_JURORS_QTY,
+            topics[_topicId].selectableJurors.length >= MIN_SELECTABLE_JURORS_QTY,
             "Insuficient selectable jurors in the topic"
         );
-        require(dai.balanceOf(msg.sender) >= topics[_topicId].priceToPublish, "Insuficient DAI to publish");
         Publication storage publication = publications[publicationId];
         publication.hash = _publicationHash;
         publication.author = msg.sender;
@@ -278,11 +408,13 @@ contract Protocol is EIP712 {
      * @param _commitment The commitment for this vote.
      * @param _nonce The nonce used to generate the given commitment.
      */
-    function commitVote(
-        uint256 _publicationId, bytes32 _commitment, uint256 _nonce
-    ) external onlyExistentPublications(_publicationId) onlyPublicationJurors(_publicationId) {
+    function commitVote(uint256 _publicationId, bytes32 _commitment, uint256 _nonce) 
+        external
+        onlyExistentPublications(_publicationId)
+        onlyPublicationJurors(_publicationId, msg.sender)
+    {
         require(timeToFinishCommitPhase(_publicationId) > 0, "Vote commit phase has already finished");
-        require(_nonce >= votings[_publicationId].votes[msg.sender].nonce, "Nonce must be greater than the last one");
+        require(_nonce == votings[_publicationId].votes[msg.sender].nonce, "Invalid nonce");
         require(proofOfHumanity.isRegistered(msg.sender), "You must be registered in Proof of Humanity");
         votings[_publicationId].votes[msg.sender].commitment = _commitment;
         votings[_publicationId].votes[msg.sender].nonce = _nonce + 1;
@@ -295,17 +427,30 @@ contract Protocol is EIP712 {
      * @param _publicationId The publication id to vote for.
      * @param _vote The actual vote value.
      * @param _justification The justification for the given vote value.
+     * @param _nonce The nonce used to generate the vote commitment.
      * @param _v The v parameter of ECDSA signature as defined in EIP712.
      * @param _r The r parameter of ECDSA signature as defined in EIP712.
      * @param _s The s parameter of ECDSA signature as defined in EIP712.
      * @return A boolean indicating if juror was penalized or not.
      */
     function revealVote(
-        uint256 _publicationId, VoteValue _vote, string calldata _justification, uint8 _v, bytes32 _r, bytes32 _s
-    ) external onlyExistentPublications(_publicationId) onlyPublicationJurors(_publicationId) returns (bool) {
+        uint256 _publicationId,
+        uint8 _vote,
+        uint256 _nonce,
+        string calldata _justification,
+        uint8 _v,
+        bytes32 _r,
+        bytes32 _s
+    )
+        external 
+        onlyExistentPublications(_publicationId)
+        onlyPublicationJurors(_publicationId, msg.sender)
+        returns (bool) 
+    {
         require(votings[_publicationId].votes[msg.sender].nonce > 0, "Missing vote commitment");
+        require(votings[_publicationId].votes[msg.sender].nonce == _nonce, "Invalid nonce: is not the last one used");
         require(timeToFinishRevealPhase(_publicationId) > 0, "Vote reveal phase has already finished");
-        require(_vote != VoteValue.None, "Vote must be different than 'None'");
+        require(_vote > uint8(VoteValue.None) && _vote <= uint8(VoteValue.Unqualified), "Invalid vote value");
         require(votings[_publicationId].votes[msg.sender].value == VoteValue.None, "Reveal already done");
         require(!votings[_publicationId].isPenalized[msg.sender], "Penalized juror");
         require(
@@ -313,16 +458,15 @@ contract Protocol is EIP712 {
             "Invalid vote reveal: revealed values do not match commitment"
         );
         require(
-            ECDSA.recover(_hashTypedDataV4(hashStruct(_publicationId, _vote)), _v, _r, _s) == msg.sender,
-            "Invalid vote reveal: invalid signature"
+            isValidSignature(_publicationId, msg.sender, _vote, _v, _r, _s), "Invalid vote reveal: invalid signature"
         );
         if (timeToFinishCommitPhase(_publicationId) > 0) {
             votings[_publicationId].isPenalized[msg.sender] = true;
         } else {
             require(proofOfHumanity.isRegistered(msg.sender), "You must be registered in Proof of Humanity");
-            countVote(_publicationId, _vote, _justification);
+            countVote(_publicationId, msg.sender, VoteValue(_vote), _justification);
         }
-        emitVoteRevealEvent(_publicationId, _vote, _justification);
+        emitVoteRevealEvent(_publicationId, msg.sender, _vote, _justification);
         return votings[_publicationId].isPenalized[msg.sender];
     }
 
@@ -346,7 +490,9 @@ contract Protocol is EIP712 {
                 }
                 gazzeth.mint(juror, topics[topicId].jurorReward);
             } else {
-                topics[topicId].jurorTimes[juror]--;
+                if (--topics[topicId].jurorTimes[juror] == 0) {
+                    topics[topicId].jurorQuantity--;
+                }
                 // TODO: Take in account the line below when topic prices can be changed by governance
                 protocolDaiBalance += topics[topicId].priceToBeJuror;
             }
@@ -372,47 +518,76 @@ contract Protocol is EIP712 {
      * @dev Generates the struct hash as defined in EIP712, used to rebuild commitment to perform reveal voting phase.
      * @param _publicationId The publication id where vote commitment corresponds to.
      * @param _vote The vote value revealed.
+     * @param _nonce The nonce used for the vote commitment.
      * @return The struct hash according to EIP712 standard.
      */
-    function hashStruct(uint256 _publicationId, VoteValue _vote) internal view returns (bytes32) {
-        return keccak256(
-            abi.encode(REVEAL_VOTE_TYPEHASH, _publicationId, _vote, votings[_publicationId].votes[msg.sender].nonce - 1)
-        );
+    function hashStruct(uint256 _publicationId, uint8 _vote, uint256 _nonce) internal view returns (bytes32) {
+        return keccak256(abi.encode(VOTE_TYPEHASH, _publicationId, _vote, _nonce));
+    }
+
+    /**
+     * @dev Returns if is a valid signature recovering the signer adderss and comparing to the juror one.
+     * @param _publicationId The publication id.
+     * @param _juror The juror address.
+     * @param _vote The vote value.
+     * @param _v The v parameter of ECDSA signature as defined in EIP712.
+     * @param _r The r parameter of ECDSA signature as defined in EIP712.
+     * @param _s The s parameter of ECDSA signature as defined in EIP712.
+     * @return A boolean indicating if is valid signature or not.
+     */
+    function isValidSignature(
+        uint256 _publicationId,
+        address _juror,
+        uint8 _vote,
+        uint8 _v,
+        bytes32 _r,
+        bytes32 _s
+    ) internal view returns (bool) {
+        uint256 nonce = votings[_publicationId].votes[_juror].nonce - 1;
+        return ECDSA.recover(_hashTypedDataV4(hashStruct(_publicationId, _vote, nonce)), _v, _r, _s) == _juror;
     }
 
     /**
      * @dev Counts the given vote for the given publication updating voting statuses.
      * @param _publicationId The publication id to vote for.
+     * @param _juror The juror address.
      * @param _vote The actual vote value.
      * @param _justification The justification for the given vote value.
      */
-    function countVote(uint256 _publicationId, VoteValue _vote, string calldata _justification) internal {
-        votings[_publicationId].voteCounters[uint256(VoteValue.None)]--;
-        votings[_publicationId].voteCounters[uint256(_vote)]++;
-        votings[_publicationId].votes[msg.sender].value = _vote;
-        votings[_publicationId].votes[msg.sender].justification = _justification;
+    function countVote(uint256 _publicationId, address _juror, VoteValue _vote, string memory _justification) internal {
+        uint8 voteAsIndex = uint8(_vote);
+        votings[_publicationId].voteCounters[uint8(VoteValue.None)]--;
+        votings[_publicationId].voteCounters[voteAsIndex]++;
+        votings[_publicationId].votes[_juror].value = _vote;
+        votings[_publicationId].votes[_juror].justification = _justification;
         if (votings[_publicationId].winningVote == _vote) {
             votings[_publicationId].maxVoteCount++;
-        } else if (votings[_publicationId].voteCounters[uint256(_vote)] == votings[_publicationId].maxVoteCount) {
+        } else if (votings[_publicationId].voteCounters[voteAsIndex] == votings[_publicationId].maxVoteCount) {
             votings[_publicationId].winningVote == VoteValue.None;
-        } else if (votings[_publicationId].voteCounters[uint256(_vote)] > votings[_publicationId].maxVoteCount) {
+        } else if (votings[_publicationId].voteCounters[voteAsIndex] > votings[_publicationId].maxVoteCount) {
             votings[_publicationId].winningVote == _vote;
-            votings[_publicationId].maxVoteCount = votings[_publicationId].voteCounters[uint256(_vote)];
+            votings[_publicationId].maxVoteCount = votings[_publicationId].voteCounters[voteAsIndex];
         }
     }
 
     /**
      * @dev Emits the VoteReveal event. Made as a separated function to avoid 'Stack too deep' error.
      * @param _publicationId The publication id to vote for.
+     * @param _juror The juror address.
      * @param _vote The actual vote value.
      * @param _justification The justification for the given vote value.
      */
-    function emitVoteRevealEvent(uint256 _publicationId, VoteValue _vote, string calldata _justification) internal {
+    function emitVoteRevealEvent(
+        uint256 _publicationId,
+        address _juror,
+        uint8 _vote,
+        string memory _justification
+    ) internal {
         emit VoteReveal(
-            msg.sender,
+            _juror,
             _publicationId,
-            votings[_publicationId].isPenalized[msg.sender] ? uint256(VoteValue.None) : uint256(_vote),
-            votings[_publicationId].isPenalized[msg.sender] ? "Penalized juror" : _justification,
+            votings[_publicationId].isPenalized[_juror] ? uint8(VoteValue.None) : _vote,
+            votings[_publicationId].isPenalized[_juror] ? "Penalized juror" : _justification,
             votings[_publicationId].voteCounters,
             uint256(votings[_publicationId].winningVote)
         );
@@ -428,6 +603,17 @@ contract Protocol is EIP712 {
     }
 
     /**
+     * @dev Verifies if author is selectable as juror in a given topic.
+     * @param _topicId The id of the topic where author is publishing.
+     * @param _author The address of the publication author.
+     * @return A boolean indicating if author is selectable or not.
+     */
+    function isAuthorSelectableAsJuror(string memory _topicId, address _author) internal view returns (bool) {
+        return topics[_topicId].jurorTimes[_author] > 0 
+            && topics[_topicId].jurorSelectedTimes[_author] < topics[_topicId].jurorTimes[_author];
+    }
+
+    /**
      * @dev Randomly selects the jurors for the given publication id.
      * @param _publicationId The publication id where jurors must be selected.
      */
@@ -435,8 +621,12 @@ contract Protocol is EIP712 {
         uint256[] memory randoms = rng.getRandomNumbers(VOTING_JURORS_QTY);
         string memory topicId = publications[_publicationId].topicId;
         uint256 selectableJurorsLength = topics[topicId].selectableJurors.length;
+        if (isAuthorSelectableAsJuror(topicId, publications[_publicationId].author)) {
+            avoidAuthorAsSelectableJuror(topicId, publications[_publicationId].author);
+            selectableJurorsLength--;
+        }
         for (uint256 i = 0; i < VOTING_JURORS_QTY; i++) {
-            uint256 selectedJurorIndex = randoms[i] % selectableJurorsLength;
+            uint256 selectedJurorIndex = randoms[i].mod(selectableJurorsLength);
             address selectedJuror = topics[topicId].selectableJurors[selectedJurorIndex];
             topics[topicId].jurorSelectedTimes[selectedJuror]++;
             votings[_publicationId].jurors.push(selectedJuror);
@@ -455,10 +645,25 @@ contract Protocol is EIP712 {
     }
 
     /**
+     * @dev Avoids an author from being selected as juror in a given topic.
+     * @param _topicId The id of the topic where author must be avoided.
+     * @param _author The address of the author.
+     */
+    function avoidAuthorAsSelectableJuror(string memory _topicId, address _author) internal {
+        uint256 lastSelectableJurorIndex = topics[_topicId].selectableJurors.length - 1;
+        uint256 authorIndex = 0;
+        while (topics[_topicId].selectableJurors[authorIndex] != _author) {
+            authorIndex++;
+        }
+        topics[_topicId].selectableJurors[authorIndex] = topics[_topicId].selectableJurors[lastSelectableJurorIndex];
+        topics[_topicId].selectableJurors[lastSelectableJurorIndex] = _author;
+    }
+
+    /**
      * @dev Creates a new topic with the given id and default values.
      * @param _topicId The id of the topic to create.
      */
-    function createTopic(string calldata _topicId) internal {
+    function createTopic(string memory _topicId) internal {
         topics[_topicId].created = true;
         topics[_topicId].priceToPublish = DEFAULT_PRICE_TO_PUBLISH;
         topics[_topicId].priceToBeJuror = DEFAULT_PRICE_TO_BE_JUROR;
@@ -468,7 +673,6 @@ contract Protocol is EIP712 {
         topics[_topicId].revealPhaseDuration = DEFAULT_REVEAL_DURATION;
         emit TopicCreation(
             _topicId,
-            msg.sender,
             DEFAULT_PRICE_TO_PUBLISH,
             DEFAULT_PRICE_TO_BE_JUROR,
             DEFAULT_AUTHOR_REWARD,
@@ -481,22 +685,20 @@ contract Protocol is EIP712 {
     /**
      * @dev Decreases times as juror in the topic. Transfers the freed deposited DAI to the juror.
      * @param _topicId The topic id where to decrease juror times.
+     * @param _juror The juror address.
      * @param _times The total times the juror is willing to be selected as juror simultaneously. Overrides the curent.
      */
-    function decreaseJurorTimes(string calldata _topicId, uint256 _times) internal {
+    function decreaseJurorTimes(string memory _topicId, address _juror, uint256 _times) internal {
         require(
-            topics[_topicId].jurorSelectedTimes[msg.sender] <= _times,
-            "You must finish some votings before decreasing times"
+            topics[_topicId].jurorSelectedTimes[_juror] <= _times,
+            "Times must be less than current juror votings"
         );
         if (_times == 0) {
             topics[_topicId].jurorQuantity--;
             // This loop can be avoided maintaining a mapping from juror address to its index in selectableJurors array
-            uint256 jurorIndex;
-            for (uint256 i = 0; i < topics[_topicId].selectableJurors.length; i++) {
-                if (topics[_topicId].selectableJurors[i] == msg.sender) {
-                    jurorIndex = i;
-                    break;
-                }
+            uint256 jurorIndex = 0;
+            while (topics[_topicId].selectableJurors[jurorIndex] != _juror) {
+                jurorIndex++;
             }
             address lastJuror = topics[_topicId].selectableJurors[topics[_topicId].selectableJurors.length - 1];
             topics[_topicId].selectableJurors[jurorIndex] = lastJuror;
@@ -505,14 +707,15 @@ contract Protocol is EIP712 {
         // TODO: Lowering topic priceToBeJuror must transfer the DAI left over according to new price for each juror
         dai.transferFrom(
             address(this),
-            msg.sender,
-            (topics[_topicId].jurorTimes[msg.sender] - _times) * topics[_topicId].priceToBeJuror
+            _juror,
+            topics[_topicId].priceToBeJuror.mul(topics[_topicId].jurorTimes[_juror].sub(_times))
         );
     }
 
     /**
      * @dev Increases times as juror in the topic. Pulls DAI as deposit from the juror.
      * @param _topicId The topic id where to decrease juror times.
+     * @param _juror The juror address.
      * @param _times The total times the juror is willing to be selected as juror simultaneously. Overrides the curent.
      * @param _nonce The nonce as defined in DAI permit function.
      * @param _expiry The expiry as defined in DAI permit function.
@@ -521,16 +724,28 @@ contract Protocol is EIP712 {
      * @param _s The s parameter of ECDSA signature as defined in EIP712.
      */
     function increaseJurorTimes(
-        string calldata _topicId, uint256 _times, uint256 _nonce, uint256 _expiry, uint8 _v, bytes32 _r, bytes32 _s
+        string memory _topicId,
+        address _juror,
+        uint256 _times,
+        uint256 _nonce,
+        uint256 _expiry,
+        uint8 _v,
+        bytes32 _r,
+        bytes32 _s
     ) internal {
-        require(proofOfHumanity.isRegistered(msg.sender), "To be a juror you must be registered on Proof of Humanity");
-        uint256 daiToDeposit = (_times - topics[_topicId].jurorTimes[msg.sender]) * topics[_topicId].priceToBeJuror;
-        require(dai.balanceOf(msg.sender) >= daiToDeposit, "Insuficient DAI to be juror that number of times");
-        if (topics[_topicId].jurorTimes[msg.sender] == 0) {
-            topics[_topicId].jurorQuantity++;
-            topics[_topicId].selectableJurors.push(msg.sender);
+        require(proofOfHumanity.isRegistered(_juror), "To be a juror you must be registered on Proof of Humanity");
+        if (topics[_topicId].jurorTimes[_juror] == topics[_topicId].jurorSelectedTimes[_juror]) {
+            // Take in account that jurorTimes[_juror] == 0 always implies jurorSelectedTimes[_juror] == 0
+            topics[_topicId].selectableJurors.push(_juror);
         }
-        dai.permit(msg.sender, address(this), _nonce, _expiry, true, _v, _r, _s);
-        dai.transferFrom(msg.sender, address(this), daiToDeposit);
+        if (topics[_topicId].jurorTimes[_juror] == 0) {
+            topics[_topicId].jurorQuantity++;
+        }
+        dai.permit(_juror, address(this), _nonce, _expiry, true, _v, _r, _s);
+        dai.transferFrom(
+            _juror,
+            address(this),
+            topics[_topicId].priceToBeJuror.mul(_times.sub(topics[_topicId].jurorTimes[_juror]))
+        );
     }
 }
