@@ -3,6 +3,7 @@ async function main() {
     console.log("Deploying contract with the account:", deployer.address);
     const Protocol = await ethers.getContractFactory("Protocol");
     const minutes = 60;
+    const eighteenDecimalsTokenUnit = 10 ** 18;
     const gazzeth = '0x718ef0A3B144C4e40f8052e52b3C8Db690A17ce0';
     const dai = '0x1038b262c3a786713def6797ad9cbc5fc20439e2';
     const proofOfHumanity = '0x9b1590A4D36255b3b18Bb681062FD159f809009f';
