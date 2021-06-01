@@ -10,6 +10,12 @@ require("@nomiclabs/hardhat-etherscan");
 
 module.exports = {
   solidity: "0.7.6",
+  settings: {
+    optimizer: {
+      enabled: true,
+      runs: 1000
+    }
+  },
   networks: {
     // ropsten: {
     //   url: `https://ropsten.infura.io/v3/${INFURA_PROJECT_ID}`,
