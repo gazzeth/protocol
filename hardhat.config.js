@@ -9,12 +9,14 @@ require("@nomiclabs/hardhat-etherscan");
 // const ETHERSCAN_API_KEY = "YOUR_ETHERSCAN_API_KEY"
 
 module.exports = {
-  solidity: "0.7.6",
-  settings: {
-    optimizer: {
-      enabled: true,
-      runs: 1000
-    }
+  solidity: {
+    version: "0.7.6",
+    settings: {
+      optimizer: {
+        enabled: false,
+        runs: 200
+      }
+    } 
   },
   networks: {
     // ropsten: {
