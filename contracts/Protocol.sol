@@ -180,7 +180,8 @@ contract Protocol is EIP712 {
      */
     function timeToFinishCommitPhase(uint256 _publicationId) public view returns (uint256) {
         return timeToDeadlineTimestamp(
-            publications[_publicationId].publishDate + topics[publications[_publicationId].topicId].commitPhaseDuration
+            publications[_publicationId].publishDate
+                .add(topics[publications[_publicationId].topicId].commitPhaseDuration)
         );
     }
 
@@ -192,16 +193,16 @@ contract Protocol is EIP712 {
     function timeToFinishRevealPhase(uint256 _publicationId) public view returns (uint256) {
         return timeToDeadlineTimestamp(
             publications[_publicationId].publishDate
-                + topics[publications[_publicationId].topicId].commitPhaseDuration
-                + topics[publications[_publicationId].topicId].revealPhaseDuration
+                .add(topics[publications[_publicationId].topicId].commitPhaseDuration)
+                .add(topics[publications[_publicationId].topicId].revealPhaseDuration)
         );
     }
 
     /**
-     * @dev Gets the next juror nonce available to use for commitment.
+     * @dev Gets nonce juror must use for next commitment in a given publication.
      * @param _juror The address of the juror corresponding to the nonce.
      * @param _publicationId The publication id corresponding to the nonce.
-     * @return An integer representing the next nonce available for the given juror and publication.
+     * @return An integer representing the nonce.
      */
     function getCommitmentNonce(address _juror, uint256 _publicationId) external view returns (uint256) {
         return votings[_publicationId].votes[_juror].nonce;
@@ -625,7 +626,7 @@ contract Protocol is EIP712 {
             selectableJurorsLength--;
         }
         for (uint256 i = 0; i < VOTING_JURORS_QTY; i++) {
-            uint256 selectedJurorIndex = randoms[i] % selectableJurorsLength;
+            uint256 selectedJurorIndex = randoms[i].mod(selectableJurorsLength);
             address selectedJuror = topics[topicId].selectableJurors[selectedJurorIndex];
             topics[topicId].jurorSelectedTimes[selectedJuror]++;
             votings[_publicationId].jurors.push(selectedJuror);
@@ -705,7 +706,9 @@ contract Protocol is EIP712 {
         }
         // TODO: Lowering topic priceToBeJuror must transfer the DAI left over according to new price for each juror
         dai.transferFrom(
-            address(this), _juror, (topics[_topicId].jurorTimes[_juror] - _times) * topics[_topicId].priceToBeJuror
+            address(this),
+            _juror,
+            topics[_topicId].priceToBeJuror.mul(topics[_topicId].jurorTimes[_juror].sub(_times))
         );
     }
 
@@ -731,7 +734,6 @@ contract Protocol is EIP712 {
         bytes32 _s
     ) internal {
         require(proofOfHumanity.isRegistered(_juror), "To be a juror you must be registered on Proof of Humanity");
-        uint256 daiToDeposit = (_times - topics[_topicId].jurorTimes[_juror]) * topics[_topicId].priceToBeJuror;
         if (topics[_topicId].jurorTimes[_juror] == topics[_topicId].jurorSelectedTimes[_juror]) {
             // Take in acccount that jurorTimes[_juror] == 0 always implies jurorSelectedTimes[_juror] == 0
             topics[_topicId].selectableJurors.push(_juror);
@@ -740,6 +742,10 @@ contract Protocol is EIP712 {
             topics[_topicId].jurorQuantity++;
         }
         dai.permit(_juror, address(this), _nonce, _expiry, true, _v, _r, _s);
-        dai.transferFrom(_juror, address(this), daiToDeposit);
+        dai.transferFrom(
+            _juror,
+            address(this),
+            topics[_topicId].priceToBeJuror.mul(_times.sub(topics[_topicId].jurorTimes[_juror]))
+        );
     }
 }
