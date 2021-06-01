@@ -3,6 +3,7 @@ pragma solidity ^0.7.0;
 
 import "@openzeppelin/contracts/drafts/EIP712.sol";
 import "@openzeppelin/contracts/math/SafeMath.sol";
+import "@openzeppelin/contracts/cryptography/ECDSA.sol";
 import "./interfaces/IDai.sol";
 import "./interfaces/IProofOfHumanity.sol";
 import "./interfaces/IRng.sol";
