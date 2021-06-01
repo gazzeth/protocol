@@ -1,7 +1,7 @@
 require("@nomiclabs/hardhat-waffle");
 require("solidity-coverage");
 require("@nomiclabs/hardhat-etherscan");
-require('hardhat-contract-sizer');
+// require('hardhat-contract-sizer');
 
 // const INFURA_PROJECT_ID = "YOUR_INFURA_PROJECT_ID";
 
@@ -19,18 +19,18 @@ module.exports = {
       }
     } 
   },
-  contractSizer: {
-    alphaSort: true,
-    runOnCompile: true,
-    disambiguatePaths: false,
-  },
-  networks: {
-    // ropsten: {
-    //   url: `https://ropsten.infura.io/v3/${INFURA_PROJECT_ID}`,
-    //   accounts: [`0x${ROPSTEN_PRIVATE_KEY}`]
-    // }
-  },
-  etherscan: {
-    // apiKey: `${ETHERSCAN_API_KEY}`
-  }
+  // contractSizer: {
+  //   alphaSort: true,
+  //   runOnCompile: true,
+  //   disambiguatePaths: false,
+  // },
+  // networks: {
+  //   ropsten: {
+  //     url: `https://ropsten.infura.io/v3/${INFURA_PROJECT_ID}`,
+  //     accounts: [`0x${ROPSTEN_PRIVATE_KEY}`]
+  //   }
+  // },
+  // etherscan: {
+  //   apiKey: `${ETHERSCAN_API_KEY}`
+  // }
 };
