@@ -57,7 +57,7 @@ contract Protocol is EIP712 {
         uint8 indexed _voteValue,
         string _justification,
         uint256[] _voteCounters,
-        uint256 _winningVote
+        uint8 _winningVote
     );
 
     event Withdrawal(uint256 indexed _publicationId);
@@ -178,8 +178,8 @@ contract Protocol is EIP712 {
      * @param _publicationId The publication id corresponding to the publication where to obtain the deadlines.
      * @return An integer representing seconds left to finish voting commit phase. Zero if publication not exists.
      */
-    function timeToFinishCommitPhase(uint256 _publicationId) public view returns (uint256) {
-        return timeToDeadlineTimestamp(
+    function getTimeToFinishCommitPhase(uint256 _publicationId) public view returns (uint256) {
+        return getTimeToDeadlineTimestamp(
             publications[_publicationId].publishDate
                 .add(topics[publications[_publicationId].topicId].commitPhaseDuration)
         );
@@ -190,8 +190,8 @@ contract Protocol is EIP712 {
      * @param _publicationId The publication id corresponding to the publication where to obtain the deadlines.
      * @return An integer representing seconds left to finish voting reveal phase. Zero if publication not exists.
      */
-    function timeToFinishRevealPhase(uint256 _publicationId) public view returns (uint256) {
-        return timeToDeadlineTimestamp(
+    function getTimeToFinishRevealPhase(uint256 _publicationId) public view returns (uint256) {
+        return getTimeToDeadlineTimestamp(
             publications[_publicationId].publishDate
                 .add(topics[publications[_publicationId].topicId].commitPhaseDuration)
                 .add(topics[publications[_publicationId].topicId].revealPhaseDuration)
@@ -413,7 +413,7 @@ contract Protocol is EIP712 {
         onlyExistentPublications(_publicationId)
         onlyPublicationJurors(_publicationId, msg.sender)
     {
-        require(timeToFinishCommitPhase(_publicationId) > 0, "Vote commit phase has already finished");
+        require(getTimeToFinishCommitPhase(_publicationId) > 0, "Vote commit phase has already finished");
         require(votings[_publicationId].votes[msg.sender].nonce == _nonce, "Invalid nonce");
         require(proofOfHumanity.isRegistered(msg.sender), "You must be registered in Proof of Humanity");
         votings[_publicationId].votes[msg.sender].commitment = _commitment;
@@ -447,14 +447,14 @@ contract Protocol is EIP712 {
         onlyPublicationJurors(_publicationId, msg.sender)
         returns (bool) 
     {
-        if (timeToFinishCommitPhase(_publicationId) > 0) {
+        if (getTimeToFinishCommitPhase(_publicationId) > 0) {
             votings[_publicationId].isPenalized[msg.sender] = true;
         } else {
             require(votings[_publicationId].votes[msg.sender].value == VoteValue.None, "Reveal already done");
             require(!votings[_publicationId].isPenalized[msg.sender], "Penalized juror");
             require(votings[_publicationId].votes[msg.sender].nonce > 0, "Missing vote commitment");
             require(votings[_publicationId].votes[msg.sender].nonce - 1 == _nonce, "Invalid nonce");
-            require(timeToFinishRevealPhase(_publicationId) > 0, "Vote reveal phase has already finished");
+            require(getTimeToFinishRevealPhase(_publicationId) > 0, "Vote reveal phase has already finished");
             require(_vote > uint8(VoteValue.None) && _vote <= uint8(VoteValue.Unqualified), "Invalid vote value");
             require(
                 votings[_publicationId].votes[msg.sender].commitment == keccak256(abi.encode(_v, _r, _s)),
@@ -476,12 +476,14 @@ contract Protocol is EIP712 {
      * @param _publicationId The publication id where perform the withdrawal.
      */
     function withdrawRewards(uint256 _publicationId) external onlyExistentPublications(_publicationId) {
-        require(timeToFinishRevealPhase(_publicationId) == 0, "Vote reveal phase has not finished yet");
+        require(getTimeToFinishRevealPhase(_publicationId) == 0, "Vote reveal phase has not finished yet");
         require(!votings[_publicationId].withdrawn, "Publication rewards already withdrawn");
         string memory topicId = publications[_publicationId].topicId;
         if (votings[_publicationId].winningVote == VoteValue.True) {
             dai.transferFrom(address(this), publications[_publicationId].author, topics[topicId].priceToPublish);
             gazzeth.mint(publications[_publicationId].author, topics[topicId].authorReward);
+        } else {
+            protocolDaiBalance += topics[topicId].priceToPublish;
         }
         for (uint256 i = 0; i < votings[_publicationId].jurors.length; i++) {
             address juror = votings[_publicationId].jurors[i];
@@ -564,9 +566,9 @@ contract Protocol is EIP712 {
         if (votings[_publicationId].winningVote == _vote) {
             votings[_publicationId].maxVoteCount++;
         } else if (votings[_publicationId].voteCounters[voteAsIndex] == votings[_publicationId].maxVoteCount) {
-            votings[_publicationId].winningVote == VoteValue.None;
+            votings[_publicationId].winningVote = VoteValue.None;
         } else if (votings[_publicationId].voteCounters[voteAsIndex] > votings[_publicationId].maxVoteCount) {
-            votings[_publicationId].winningVote == _vote;
+            votings[_publicationId].winningVote = _vote;
             votings[_publicationId].maxVoteCount = votings[_publicationId].voteCounters[voteAsIndex];
         }
     }
@@ -590,7 +592,7 @@ contract Protocol is EIP712 {
             votings[_publicationId].isPenalized[_juror] ? uint8(VoteValue.None) : _vote,
             votings[_publicationId].isPenalized[_juror] ? "Penalized juror" : _justification,
             votings[_publicationId].voteCounters,
-            uint256(votings[_publicationId].winningVote)
+            uint8(votings[_publicationId].winningVote)
         );
     }
 
@@ -599,7 +601,7 @@ contract Protocol is EIP712 {
      * @param _deadlineTimestamp The deadline where to obtain the time left.
      * @return An integer representing seconds left to reach the given deadline.
      */
-    function timeToDeadlineTimestamp(uint256 _deadlineTimestamp) internal view returns (uint256) {
+    function getTimeToDeadlineTimestamp(uint256 _deadlineTimestamp) internal view returns (uint256) {
         return _deadlineTimestamp <= block.timestamp ? 0 : _deadlineTimestamp - block.timestamp;
     }
 
