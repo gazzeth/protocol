@@ -1,6 +1,7 @@
 require("@nomiclabs/hardhat-waffle");
 require("solidity-coverage");
 require("@nomiclabs/hardhat-etherscan");
+require('hardhat-contract-sizer');
 
 // const INFURA_PROJECT_ID = "YOUR_INFURA_PROJECT_ID";
 
@@ -13,10 +14,15 @@ module.exports = {
     version: "0.7.6",
     settings: {
       optimizer: {
-        enabled: false,
-        runs: 200
+        enabled: true,
+        runs: 1000
       }
     } 
+  },
+  contractSizer: {
+    alphaSort: true,
+    runOnCompile: true,
+    disambiguatePaths: false,
   },
   networks: {
     // ropsten: {
