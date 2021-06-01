@@ -356,7 +356,7 @@ contract Protocol is EIP712 {
             increaseJurorTimes(_topicId, msg.sender, _times, _nonce, _expiry, _v, _r, _s);
         }
         topics[_topicId].jurorTimes[msg.sender] = _times;
-        JurorSubscription(msg.sender, _topicId, _times);
+        emit JurorSubscription(msg.sender, _topicId, _times);
     }
 
     /**
