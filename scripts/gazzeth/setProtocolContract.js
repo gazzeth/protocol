@@ -2,9 +2,9 @@ async function main() {
     const [sender] = await ethers.getSigners();
     console.log("Calling contract with the account:", sender.address);
     const Gazzeth = await ethers.getContractFactory("Gazzeth");
-    const gazzethAddress = '0x718ef0A3B144C4e40f8052e52b3C8Db690A17ce0';
+    const gazzethAddress = '0x6A68F71e0469464B0C1D8A2Eb864a0486f3166Cf';
     const gazzeth = Gazzeth.attach(gazzethAddress);
-    const protocolAddress = '0xFa69eEf3065143ef233aA25f02beAA96d3B8BA99';
+    const protocolAddress = '0x92Fba6413071183583a1d6125656D04437b1320f';
     const transaction = await gazzeth.setProtocolContractAddress(protocolAddress);
     console.log("Transaction:", transaction);
 }
