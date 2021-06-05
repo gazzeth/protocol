@@ -24,12 +24,13 @@ contract Protocol is EIP712 {
     }
 
     modifier onlyExistentTopics(string calldata _topicId) {
-        require(topics[_topicId].created, "Topic does not exists");
+        require(topics[_topicId].created, "Unexistent topic");
         _;
     }
 
     event TopicCreation(
-        string indexed _topicId,
+        string indexed _topicIdHash,
+        string _topicId,
         uint256 _priceToPublish,
         uint256 _priceToBeJuror,
         uint256 _authorReward,
@@ -38,12 +39,13 @@ contract Protocol is EIP712 {
         uint256 _revealPhaseDuration
     );
 
-    event JurorSubscription(address indexed _juror, string indexed _topicId, uint256 _times);
+    event JurorSubscription(address indexed _juror, string indexed _topicIdHash, string _topicId, uint256 _times);
 
     event PublicationSubmission(
         uint256 indexed _publicationId,
         address indexed _author,
-        string indexed _topicId,
+        string indexed _topicIdHash,
+        string _topicId,
         address[] _jurors,
         string _hash,
         uint256 _publishDate
@@ -357,7 +359,7 @@ contract Protocol is EIP712 {
             increaseJurorTimes(_topicId, msg.sender, _times, _nonce, _expiry, _v, _r, _s);
         }
         topics[_topicId].jurorTimes[msg.sender] = _times;
-        emit JurorSubscription(msg.sender, _topicId, _times);
+        emit JurorSubscription(msg.sender, _topicId, _topicId, _times);
     }
 
     /**
@@ -396,9 +398,7 @@ contract Protocol is EIP712 {
         votings[publicationId].voteCounters = [VOTING_JURORS_QTY, 0, 0, 0];
         dai.permit(msg.sender, address(this), _nonce, _expiry, true, _v, _r, _s);
         dai.transferFrom(msg.sender, address(this), topics[_topicId].priceToPublish);
-        emit PublicationSubmission(
-            publicationId, msg.sender, _topicId, votings[publicationId].jurors, _publicationHash, block.timestamp
-        );
+        emitPublicationSubmissionEvent(publicationId, _publicationHash, msg.sender, _topicId);
         return publicationId++;
     }
 
@@ -415,7 +415,6 @@ contract Protocol is EIP712 {
     {
         require(getTimeToFinishCommitPhase(_publicationId) > 0, "Vote commit phase has already finished");
         require(votings[_publicationId].votes[msg.sender].nonce == _nonce, "Invalid nonce");
-        require(proofOfHumanity.isRegistered(msg.sender), "You must be registered in Proof of Humanity");
         votings[_publicationId].votes[msg.sender].commitment = _commitment;
         votings[_publicationId].votes[msg.sender].nonce = _nonce + 1;
         emit VoteCommitment(msg.sender, _publicationId, _commitment);
@@ -574,6 +573,30 @@ contract Protocol is EIP712 {
     }
 
     /**
+     * @dev Emits the PublicationSubmission event. Made as a separated function to avoid 'Stack too deep' error.
+     * @param _publicationId The id of the published one that triggers the event.
+     * @param _publicationHash The hash of the publication.
+     * @param _author The address of the author.
+     * @param _topicId The id of the topic where the publication was published to.
+     */
+    function emitPublicationSubmissionEvent(
+        uint256 _publicationId,
+        string calldata _publicationHash,
+        address _author,
+        string calldata _topicId
+    ) internal {
+        emit PublicationSubmission(
+            _publicationId,
+            _author,
+            _topicId,
+            _topicId,
+            votings[_publicationId].jurors,
+            _publicationHash,
+            block.timestamp
+        );
+    }
+
+    /**
      * @dev Emits the VoteReveal event. Made as a separated function to avoid 'Stack too deep' error.
      * @param _publicationId The publication id to vote for.
      * @param _juror The juror address.
@@ -676,6 +699,7 @@ contract Protocol is EIP712 {
         topics[_topicId].revealPhaseDuration = DEFAULT_REVEAL_DURATION;
         emit TopicCreation(
             _topicId,
+            _topicId,
             DEFAULT_PRICE_TO_PUBLISH,
             DEFAULT_PRICE_TO_BE_JUROR,
             DEFAULT_AUTHOR_REWARD,
@@ -736,7 +760,7 @@ contract Protocol is EIP712 {
         bytes32 _r,
         bytes32 _s
     ) internal {
-        require(proofOfHumanity.isRegistered(_juror), "To be a juror you must be registered on Proof of Humanity");
+        require(proofOfHumanity.isRegistered(_juror), "You must be registered in Proof of Humanity");
         if (topics[_topicId].jurorTimes[_juror] == topics[_topicId].jurorSelectedTimes[_juror]) {
             // Take in account that jurorTimes[_juror] == 0 always implies jurorSelectedTimes[_juror] == 0
             topics[_topicId].selectableJurors.push(_juror);

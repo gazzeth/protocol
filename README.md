@@ -1,6 +1,6 @@
 # protocol
 Gazzeth decentralized protocol
 
-**Gazzeth Ropsten Address:** [0x6A68F71e0469464B0C1D8A2Eb864a0486f3166Cf](https://ropsten.etherscan.io/address/0x6A68F71e0469464B0C1D8A2Eb864a0486f3166Cf)
+**Gazzeth Ropsten Address:** [0x580a029703B3486386f2cb5d74B26EC00D1c4277](https://ropsten.etherscan.io/address/0x580a029703B3486386f2cb5d74B26EC00D1c4277)
 
-**Protocol Ropsten Address:** [0x92Fba6413071183583a1d6125656D04437b1320f](https://ropsten.etherscan.io/address/0x92Fba6413071183583a1d6125656D04437b1320f)
+**Protocol Ropsten Address:** [0x5De246E6FA46aA928B092F97dc0CA554b640D3AB](https://ropsten.etherscan.io/address/0x5De246E6FA46aA928B092F97dc0CA554b640D3AB)
